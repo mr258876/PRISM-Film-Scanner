@@ -1,0 +1,9 @@
+".\build\Project_PRISM_CY7C68103A.obj",
+".\build\fw.obj",
+".\build\dscr.obj",
+".\EZUSB.LIB",
+".\build\USBJmpTb.obj" 
+TO ".\build\Project_PRISM_CY7C68103A" 
+PRINT(".\Project_PRISM_CY7C68103A.m51") RAMSIZE(256) 
+CODE( 0x0080 )
+XDATA( 0x1400 )

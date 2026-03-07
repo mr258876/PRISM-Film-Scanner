@@ -1,0 +1,199 @@
+;
+; Copyright (c) 2026 mr258876
+;
+; SPDX-License-Identifier: BSD-3-Clause
+;
+
+; SM0 Clock: 125 MHz
+;; !Important!
+;; Actual pin ouputs are ~8ns delayed due to UCC27524
+; GPIO 0: CCD_CLK_SH
+; GPIO 1: CCD_CLK_1
+; GPIO 2: CCD_CLK_2
+; GPIO 3: CCD_CLK_2B
+; GPIO 4: CCD_CLK_RS
+; GPIO_5: CCD_CLK_CP
+
+.program line_sig_generate
+.side_set 1
+.wrap_target
+line_sig_init:                                  ; (0)12345 <- GPIO 0-5
+    set pins, 0b01001       [1]     side 0      ; (L)HLLHH, RS high CP low (16ns)
+    set pins, 0b10001       [1]     side 0      ; (L)HLLLH, RS low CP high (16ns)
+    set pins, 0b00001       [15]    side 0      ; ┌ (L)HLLLL, RW/CP low (128ns)
+    out x, 16               [15]    side 0      ; | (L)HLLLL, SH high (8ns + 120ns)   Load & controls exposure time, as well as enable of exposure
+                                                ; └-> >= 200ns in total (t18)
+sh_high_loop:                                   ; ┌
+    jmp x-- sh_high_loop    [11]    side 1      ; | (H)HLLLL, SH high (96ns)*(x+1)
+                                                ; └-> >= 1000ns in total (t3)
+    out x, 16               [15]    side 0      ; ┌ (L)HLLLL, SH low, Load counter value=3796 (128ns)
+    irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # idk why it only need 1 cycle delay, should be 2 cycles in theory
+                                                ; └-> >= 200ns in total (t19)
+    irq clear 4             [0]     side 0      ; -2 clear IRQ4, for state machine syncing (expected 16ns, -8ns for MOSFET delay)
+line_sig_loop:
+    set pins, 0b01110       [1]     side 0      ; 0  S0 - (L)LHHHH, RS high CP low (16ns)
+                                                ; 1
+    set pins, 0b10110       [1]     side 0      ; 2  S1 - (L)LHHLH, RS low CP high (16ns)
+                                                ; 3
+    set pins, 0b00110       [1]     side 0      ; 4  S2 - (L)LHHLL, RS/CP low, ready for refence sample (16ns)
+                                                ; 5
+    set pins, 0b00001       [3]     side 0      ; 6  S3 - (L)HLLLL, CLK2B low, enable signal output (32ns) 
+                                                ; 7
+                                                ; 8  
+                                                ; 9
+    jmp x-- line_sig_loop   [1]     side 0      ; 10 S4 - (L)HLLLL, jump to sig_out_loop_clock, sample pixel NOW (16ns)
+                                                ; 11
+.wrap
+
+
+; SM1 Clock: 125MHz
+; GPIO 12/16: ADC2_ADCCLK/ADC1_ADCCLK
+; GPIO 13/17: ADC2_CDSCLK2/ADC1_CDSCLK2
+; GPIO 14/18: ADC2_CDSCLK1/ADC1_CDSCLK1
+; GPIO 15: EXPOSURE_SYNC
+
+.program cds_line_generate
+.side_set 3
+.wrap_target
+cds_line_init:
+    set pins 0b1000         [0] side 0b000      ;       Exposure Sync
+    out x, 32               [0] side 0b000      ;       Load counter value=3796
+    irq wait 4              [3] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
+                                                ; 0     Detects IRQ clear, exit stall state
+                                                ; 1   
+                                                ; 2     
+cds_pixel_loop:
+    set pins 0b0100         [1] side 0b100      ; 3     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
+                                                ; 4
+    set pins 0b0000         [1] side 0b000      ; 5     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
+                                                ; 6
+    set pins 0b0010         [1] side 0b010      ; 7     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
+                                                ; 8
+    set pins 0b0011         [1] side 0b011      ; 9     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
+                                                ; 10
+    set pins 0b0001         [1] side 0b001      ; 11    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
+                                                ; 0
+    jmp x-- cds_pixel_loop  [1] side 0b001      ; 1     S5 - LLH, Check whether to continue pixel loop
+                                                ; 2
+.wrap
+
+; SM2 Clock: 125MHz (Sync FIFO mode)
+; GPIO 19: FIFO_SLWR
+; GPIO 20: FIFO_IFCLK (driven by SM3)
+; GPIO 21: FIFO_PKTEND
+; GPIO 22: FIFO_SLCS (unused, keep low)
+
+.program fifo_line_generate_sync
+.side_set 3
+.wrap_target
+fifo_line_sync_init:
+    out y, 16                   [0] side 0b101   ;          SLWR high, PKTEND high
+    irq wait 4                  [3] side 0b111   ;          CLK Generation in idle                  CLK LHHH
+                                                 ; 0
+                                                 ; 1
+                                                 ; 2
+    out x, 16                   [2] side 0b100   ; 3        Load counter value=3797*2-1=7593, LLH SLWR low, prepare for bus sample     CLK LLL
+                                                 ; 4
+                                                 ; 5
+fifo_line_sync_loop:
+    nop                         [2] side 0b110   ; 6    0   S0 - HHL CLK rising, sample bus data    CLK HHH
+                                                 ; 7    1       
+                                                 ; 8    2     
+    jmp x-- fifo_line_sync_loop [2] side 0b100   ; 9    3   S1 - HLL CLK falling                    CLK LLL
+                                                 ; 10   4     
+                                                 ; 11   5     
+fifo_line_sync_end:
+    jmp !y fifo_line_sync_init  [2] side 0b110   ;                                                  CLK HHH
+    nop                         [3] side 0b001   ;          PKTEND low CLK rising, execute flush    CLK LLLH
+.wrap
+
+
+; SM3 Clock: 125MHz / 6 = 20.83MHz IFCLK (Sync FIFO mode)
+; GPIO 20: FIFO_IFCLK
+
+.program ifclk_generate
+.side_set 1
+.wrap_target
+    irq clear 5             [2] side 1  ; Sync with SMs
+    nop                     [2] side 0
+.wrap
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void line_sig_generate_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_gpio_init(pio, pin + 1);
+   pio_gpio_init(pio, pin + 2);
+   pio_gpio_init(pio, pin + 3);
+   pio_gpio_init(pio, pin + 4);
+   pio_gpio_init(pio, pin + 5);
+
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 6, true);
+   pio_sm_config c = line_sig_generate_program_get_default_config(offset);
+   sm_config_set_set_pins(&c, pin + 1, 5);
+   sm_config_set_sideset_pins(&c, pin);
+
+   sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);   // Merge RX buffer to TX
+   sm_config_set_out_shift(&c, true, true, 32);    // Enable auto pull
+
+   sm_config_set_clkdiv(&c, 1);                     // SM clock = 125/1 = 125Mhz
+   
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+void cds_line_generate_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_gpio_init(pio, pin + 1);
+   pio_gpio_init(pio, pin + 2);
+   pio_gpio_init(pio, pin + 3);
+   pio_gpio_init(pio, pin + 4);
+   pio_gpio_init(pio, pin + 5);
+   pio_gpio_init(pio, pin + 6);
+   
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 7, true);
+   pio_sm_config c = cds_line_generate_program_get_default_config(offset);
+   sm_config_set_set_pins(&c, pin, 4);
+   sm_config_set_sideset_pins(&c, pin + 4);
+
+   sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);   // Merge RX buffer to TX
+   sm_config_set_out_shift(&c, true, true, 32);    // Enable auto pull
+
+   sm_config_set_clkdiv(&c, 1);                     // SM clock = 125Mhz
+
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+void fifo_line_generate_sync_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_gpio_init(pio, pin + 1);
+   pio_gpio_init(pio, pin + 2);
+   pio_gpio_init(pio, pin + 3);
+
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 4, true);
+   pio_sm_set_consecutive_pindirs(pio, sm, pin + 1, 1, false); // IFCLK driven by SM3
+
+   pio_sm_config c = fifo_line_generate_sync_program_get_default_config(offset);
+   sm_config_set_sideset_pins(&c, pin);
+
+   sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);   // Merge RX buffer to TX
+   sm_config_set_out_shift(&c, true, true, 32);    // Enable auto pull
+
+   sm_config_set_clkdiv(&c, 1);                      // SM clock = 125MHz
+
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+void ifclk_generate_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+   pio_sm_config c = ifclk_generate_program_get_default_config(offset);
+   sm_config_set_sideset_pins(&c, pin);
+
+   sm_config_set_clkdiv(&c, 1);                      // SM clock = 125MHz, output IFCLK = 20.83MHz
+
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+%}
