@@ -176,7 +176,7 @@ The following table shows how these two instructions works (assume they work in 
 | 0        | **irq wait 4**           | something else… |
 | 1        | waiting…                 |                 |
 | 2        |                          | **irq clear 4** |
-| 3        | **irq clear detected**   | something else… |
+| 3        | ***irq clear detected*** | something else… |
 | 4        | continue to instruction… |                 |
 | 5        |                          |                 |
 
@@ -187,37 +187,81 @@ We start with SM0 first, since it is the base of our clocks. In every line prepa
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0              | SM1 | SM2 | SM3                 |
 | ------------- | ---------- | ------------- | ---------------- | --- | --- | ------------------- |
 | -18           |            |               | (irq wait 5)     |     |     | irq clear 5, side 1 |
-| -17           |            |               | Exit Stall State |     |     | side 1              |
-| -16           |            |               | delay 1/14       |     |     | side 1              |
-| -15           |            |               | delay 2/14       |     |     | side 0              |
-| -14           |            |               | delay 3/14       |     |     | side 0              |
+| -17           |            |               | Exit Stall State |     |     | 1                   |
+| -16           |            |               | delay 1/14       |     |     | 1                   |
+| -15           |            |               | delay 2/14       |     |     | 0                   |
+| -14           |            |               | delay 3/14       |     |     | 0                   |
 
 Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. SM1 and SM2 then start to delay the clocks set in `irq wait 4` instruction.
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0           | SM1              | SM2                 | SM3 |
 | ------------- | ---------- | ------------- | ------------- | ---------------- | ------------------- | --- |
 | -3            |            |               | delay 14/14   |                  |                     | 0   |
-| -2            |            |               | irq clear 4   | (irq wait 4)     | (irq wait 4)        | 0   |
-| -1            |            |               | (MOS delay)   | Exit Stall State | Exit Stall State    | 0   |
+| -2            |            |               | irq clear 4   | (irq wait 4)     | (irq wait 4)        |     |
+| -1            |            |               | (MOS delay)   | Exit Stall State | Exit Stall State    |     |
 | 0             | 0          | 0             | S0            | delay 1/3        | delay 1/3           | 1   |
-| 1             | 0          | 1             | delay 1       | delay 2/3        | delay 2/3           | 1   |
-| 2             | 0          | 2             | S1            | delay 3/3        | delay 3/3           | 1   |
-| 3             | 0          | 3             | delay 1       | S0               | out x               | 0   |
-| 4             | 0          | 4             | S2 (ref. out) | delay 1          | delay 1/2           | 0   |
-| 5             | 0          | 5             | delay 1       | S1 (ref. sample) | delay 2/2           | 0   |
-| 6             | 0          | 6             | S3            | delay 1          | S0 (ADC bus sample) | 1   |
-| 7             | 0          | 7             | delay 1/3     | S2               | delay 1/2           | 1   |
-| 8             | 0          | 8             | delay 2/3     | delay 1          | delay 1/2           | 1   |
-| 9             | 0          | 9             | delay 3/3     | S3               | S1                  | 0   |
-| 10            | 0          | 10            | S4 (sig. out) | delay 1          | delay 1/2           | 0   |
-| 11            | 0          | 11            | delay 1       | S4 (sig. sample) | delay 2/2           | 0   |
+| 1             |            | 1             | delay 1       | delay 2/3        | delay 2/3           |     |
+| 2             |            | 2             | S1            | delay 3/3        | delay 3/3           |     |
+| 3             |            | 3             | delay 1       | S0               | out x               | 0   |
+| 4             |            | 4             | S2 (ref. out) | delay 1          | delay 1/2           |     |
+| 5             |            | 5             | delay 1       | S1 (ref. sample) | delay 2/2           |     |
+| 6             |            | 6             | S3            | delay 1          | S0 (ADC bus sample) | 1   |
+| 7             |            | 7             | delay 1/3     | S2               | delay 1/2           |     |
+| 8             |            | 8             | delay 2/3     | delay 1          | delay 1/2           |     |
+| 9             |            | 9             | delay 3/3     | S3               | S1                  | 0   |
+| 10            |            | 10            | S4 (sig. out) | delay 1          | delay 1/2           |     |
+| 11            |            | 11            | delay 1       | S4 (sig. sample) | delay 2/2           |     |
 | 12            | 1          | 0             | S0            | delay 1          | S0 (ADC bus sample) | 1   |
-| 13            | 1          | 1             | delay 1       | S5               | delay 1/2           | 1   |
-| 12            | 1          | 0             | S0            | delay 1          | delay 2/2           | 1   |
+| 13            |            | 1             | delay 1       | S5               | delay 1/2           |     |
+| 12            |            | 0             | S0            | delay 1          | delay 2/2           |     |
 
 Here SM0 has a extra `MOS delay`, which is not a actual instruction. It is a ~8ns delay of UCC27524 MOS driver, and we put it here since it could help syncing the SMs.
 
 And then our SMs are synced, our CCD clocks are generated. ADC clocks are 1 clock delayed than CCD clocks, in order to get stable voltages. Bus sample of USB buffer happens 3 clocks after ADCCLK changes, making sure we are not getting wrong data.
+
+For the rest of pixel clocks, they are exactly identical to CLK#3-12. After that, the clocks enters preparation period again. Since the preparation of SM0 is way longer than SM1 and SM2, we are ignoreing their states after the pixel clock ends until they're wake up again. 
+
+| Absolute CLK# | Pixel CLK# | Relative CLK# | SM0            | SM1              | SM2                 | SM3 |
+| ------------- | ---------- | ------------- | -------------- | ---------------- | ------------------- | --- |
+| 45561         | 3796       | 10            | S4 (sig. out)  | delay 1          | delay 1/2           | 0   |
+| 45562         |            | 11            | delay 1        | S4 (sig. sample) | delay 2/2           |     |
+| 45563         | X          |               | set pins       | delay 1          | S0 (ADC bus sample) | 1   |
+| 45564         |            |               | delay 1        | S5               | delay 1/2           |     |
+| 45565         |            |               | set pins       | delay 1          | delay 2/2           |     |
+| 45566         |            |               | delay 1        | delay 1          | S1                  | 0   |
+| 45567         |            |               | set pins       | S5               | delay 1/2           |     |
+| 45568         |            |               | delay 1/15     | delay 1          | delay 2/2           |     |
+| 45569         |            |               | delay 2/15     | ...              | ...                 | 1   |
+| ...           |            |               | ...            |                  |                     | ... |
+| 45583         |            |               | delay 15/15    |                  |                     | 1   |
+| 45584         |            |               | out x          |                  |                     |     |
+| 45585         |            |               | delay 1/15     |                  |                     | 0   |
+| ...           |            |               | ...            |                  |                     | ... |
+| 45600         |            |               | delay 12*(x+1) |                  |                     | 1   |
+
+Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. The reason why the delay here is degisned as 12*(x+1) is, 12 clock cycles could make SM3 run 2 entire cycles. We have aligned SM0's execution and SM3's using the tons of delay avaliable in line preparation, and it will make aligning following instructions much more easier.
+
+| Absolute CLK# | Pixel CLK# | Relative CLK# | SM0              | SM1              | SM2              | SM3                 |
+| ------------- | ---------- | ------------- | ---------------- | ---------------- | ---------------- | ------------------- |
+| 45600         |            |               | delay 12*(x+1)   |                  |                  | 1                   |
+| ...           |            |               | ...              |                  |                  | ...                 |
+| 45743         |            |               | delay 12/12      |                  |                  | 0                   |
+| 45744         |            |               | delay 1/15       |                  |                  | 1                   |
+| ...           |            |               | ...              |                  |                  | ...                 |
+| 45758         |            |               | delay 15/15      |                  |                  | 1                   |
+| 45799         |            |               | irq wait 5       |                  |                  | 0                   |
+| 45760         |            |               | Stalled          |                  |                  |                     |
+| 45761         |            |               | Stalled          |                  |                  |                     |
+| 45762         |            |               | Stalled          |                  |                  | irq clear 5, side 1 |
+| 45763(-17)    |            |               | Exit Stall State |                  |                  |                     |
+| 45764(-16)    |            |               | delay 1/14       |                  |                  |                     |
+| ...           |            |               | ...              |                  |                  | ...                 |
+| 45777(-3)     |            |               | delay 14/14      |                  |                  | 0                   |
+| 45778(-2)     |            |               | irq clear 4      | (irq wait 4)     | (irq wait 4)     |                     |
+| 45779(-1)     |            |               | (MOS delay)      | Exit Stall State | Exit Stall State |                     |
+| 45780(0)      | 0          | 0             | S0               | delay 1/3        | delay 1/3        | 1                   |
+
+After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first. Then we may conclude that, for each line of scan, it takes 45780 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45636 clocks.
 
 For a full timing sequence, please check [State Machine Sequence.xlsx](<State Machine Sequence.xlsx>).
 

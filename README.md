@@ -15,5 +15,8 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 - Planned - Film holder & feeding system
 - Planned - Sensor curcit optimization
 
-## Reading Materials
+## If You're Curious
 - [Timing Sequence Design of Imaging Subsystem - Readme of RP2040 Firmware](Firmware/Project_PRISM_RP2040/README.md)
+
+## Credits
+- [jackw01/scanlight](https://github.com/jackw01/scanlight)
