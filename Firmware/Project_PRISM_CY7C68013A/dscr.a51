@@ -3,6 +3,7 @@
 ;;   Contents:  USB descriptor of fifo buffer.  
 ;;
 ;;   Copyright (c) 2026, mr258876
+;;   SPDX-License-Identifier: MIT
 ;;-----------------------------------------------------------------------------
 
    

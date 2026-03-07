@@ -1,3 +1,9 @@
 *.LST
 .vscode/*
 build
+EZUSB.LIB
+fw.c
+Fx2.h
+fx2regs.h
+fx2sdly.h
+USBJmpTb.a51

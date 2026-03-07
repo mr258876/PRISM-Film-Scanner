@@ -4,6 +4,7 @@
 //   Contents:   USB FIFO implementation.
 //
 // Copyright (c) 2026, mr258876
+// SPDX-License-Identifier: MIT
 //-----------------------------------------------------------------------------
 #include "fx2.h"
 #include "fx2regs.h"

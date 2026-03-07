@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "usb_task.h"
 
 #include <string.h>

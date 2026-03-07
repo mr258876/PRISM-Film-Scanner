@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef _AD9826_SPI_H_
 #define _AD9826_SPI_H_
 

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "persistent_params.h"
 
 #include <string.h>

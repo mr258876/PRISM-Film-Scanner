@@ -1,0 +1,22 @@
+diff --git a/Firmware/Project_PRISM_CY7C68013A/Fx2.h b/Firmware/Project_PRISM_CY7C68013A/Fx2.h
+index 3d08359..69d8a70 100644
+--- a/Firmware/Project_PRISM_CY7C68013A/Fx2.h
++++ b/Firmware/Project_PRISM_CY7C68013A/Fx2.h	
+@@ -77,6 +77,7 @@
+ #define SC_GET_INTERFACE      0x0a   // Setup command: Get Interface
+ #define SC_SET_INTERFACE      0x0b   // Setup command: Set Interface
+ #define SC_SYNC_FRAME         0x0c   // Setup command: Sync Frame
++#define SC_GET_WCID_DESCRIPTOR 0x17 // Setup command: WCID Descriptor
+ #define SC_ANCHOR_LOAD         0xa0   // Setup command: Anchor load
+    
+ #define GD_DEVICE          0x01  // Get descriptor: Device
+@@ -90,6 +91,9 @@
+ #define GD_HID	            0x21	// Get descriptor: HID
+ #define GD_REPORT	         0x22	// Get descriptor: Report
+ 
++#define GWD_GET_FEATURE 0x04          // Get WCID descriptor feature: Get Compatible ID Feature Descriptor
++#define GWD_GET_EXTENDED_FEATURE 0x05 // Get WCID descriptor feature: Get Extended Properties Feature Descriptor
++
+ #define GS_DEVICE          0x80  // Get Status: Device
+ #define GS_INTERFACE       0x81  // Get Status: Interface
+ #define GS_ENDPOINT        0x82  // Get Status: End Point

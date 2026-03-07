@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef _PINOUTS_H_
 #define _PINOUTS_H_
 

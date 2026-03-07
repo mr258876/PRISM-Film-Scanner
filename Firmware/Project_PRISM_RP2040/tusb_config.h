@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef _TUSB_CONFIG_H_
 #define _TUSB_CONFIG_H_
 

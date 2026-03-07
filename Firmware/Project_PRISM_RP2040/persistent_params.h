@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef _PERSISTENT_PARAMS_H_
 #define _PERSISTENT_PARAMS_H_
 

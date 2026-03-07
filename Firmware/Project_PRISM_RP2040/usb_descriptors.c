@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "tusb.h"
 #include "pico/unique_id.h"
 #include <string.h>
