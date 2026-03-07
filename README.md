@@ -16,4 +16,4 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 - Planned - Sensor curcit optimization
 
 ## Reading Materials
-- [Timing Sequence Design of Imaging Subsystem - Readme of RP2040 Firmware](Firmware/PROJECT_PRISM_RP2040/README.md)
+- [Timing Sequence Design of Imaging Subsystem - Readme of RP2040 Firmware](Firmware/Project_PRISM_RP2040/README.md)
