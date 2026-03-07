@@ -213,7 +213,7 @@ Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. 
 | 11            |            | 11            | delay 1       | S4 (sig. sample) | delay 2/2           |     |
 | 12            | 1          | 0             | S0            | delay 1          | S0 (ADC bus sample) | 1   |
 | 13            |            | 1             | delay 1       | S5               | delay 1/2           |     |
-| 12            |            | 0             | S0            | delay 1          | delay 2/2           |     |
+| 14            |            | 2             | S1            | delay 1          | delay 2/2           |     |
 
 Here SM0 has a extra `MOS delay`, which is not a actual instruction. It is a ~8ns delay of UCC27524 MOS driver, and we put it here since it could help syncing the SMs.
 
@@ -286,4 +286,4 @@ And here is a quick lookup table if you want to change line exposure time.
 
 Thanks for reading, and I hope this article could help you in your development. 
 
-The PIO in RP2040/RP2350 is really a powerful peripheral, and it makes many projects with pricise timing controls now possible. I hope to see more MCUs with similar feature avaliable on the market in the future.
+The PIO in RP2040/RP2350 is really a powerful peripheral, and it makes many projects with pricise timing controls now possible. I hope to see more MCUs with similar feature avaliable on market in the future.

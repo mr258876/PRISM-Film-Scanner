@@ -9,6 +9,7 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 
 ## Progress Milestones
 - Finished - Linear CCD sensor proof of concept (Mar 7, 2026)
+- In progress - Control software
 - In progress - Lens system
 - In progress - Synchronized RGB light source
 - Planned - Auto focus system
@@ -20,3 +21,21 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 
 ## Credits
 - [jackw01/scanlight](https://github.com/jackw01/scanlight)
+
+## License
+
+See `LICENSE`.
+
+This repository contains hardware design files and firmware/software source code released
+under different licenses. Unless a file states otherwise via `SPDX-License-Identifier`,
+the following defaults apply:
+
+1) `Hardware/`
+   - License: [CERN Open Hardware Licence v2 - Weakly Reciprocal](LICENSES/CERN-OHL-W-2.0.txt)
+   - SPDX: `CERN-OHL-W-2.0`
+
+2) `Firmware/`
+   - License: [MIT License](LICENSES/MIT.txt)
+   - SPDX: `MIT`
+
+Copyright (c) 2026 mr258876
