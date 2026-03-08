@@ -1,0 +1,3 @@
+[submodule "Host Software"]
+	path = Host Software
+	url = https://github.com/mr258876/PRISM-Utility.git
