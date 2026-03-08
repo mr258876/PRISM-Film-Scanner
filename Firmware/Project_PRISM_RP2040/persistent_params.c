@@ -57,12 +57,14 @@ static uint32_t encode_adc1_offset(const prism_params_t *params) { return params
 static uint32_t encode_adc2_gain(const prism_params_t *params) { return params->adc2_gain; }
 static uint32_t encode_adc2_offset(const prism_params_t *params) { return params->adc2_offset; }
 static uint32_t encode_exposure_ticks(const prism_params_t *params) { return params->exposure_ticks; }
+static uint32_t encode_sys_clock_khz(const prism_params_t *params) { return params->sys_clock_khz; }
 
 static void decode_adc1_gain(prism_params_t *params, uint32_t value) { params->adc1_gain = (uint16_t)value; }
 static void decode_adc1_offset(prism_params_t *params, uint32_t value) { params->adc1_offset = (uint16_t)value; }
 static void decode_adc2_gain(prism_params_t *params, uint32_t value) { params->adc2_gain = (uint16_t)value; }
 static void decode_adc2_offset(prism_params_t *params, uint32_t value) { params->adc2_offset = (uint16_t)value; }
 static void decode_exposure_ticks(prism_params_t *params, uint32_t value) { params->exposure_ticks = (uint16_t)value; }
+static void decode_sys_clock_khz(prism_params_t *params, uint32_t value) { params->sys_clock_khz = value; }
 
 static prism_param_desc_t g_param_desc[] = {
     {"prism.adc1.gain", PRISM_PARAM_TYPE_U16, 2, encode_adc1_gain, decode_adc1_gain, 0},
@@ -70,6 +72,7 @@ static prism_param_desc_t g_param_desc[] = {
     {"prism.adc2.gain", PRISM_PARAM_TYPE_U16, 2, encode_adc2_gain, decode_adc2_gain, 0},
     {"prism.adc2.offset", PRISM_PARAM_TYPE_U16, 2, encode_adc2_offset, decode_adc2_offset, 0},
     {"prism.exposure_ticks", PRISM_PARAM_TYPE_U16, 2, encode_exposure_ticks, decode_exposure_ticks, 0},
+    {"prism.sys_clock_khz", PRISM_PARAM_TYPE_U32, 4, encode_sys_clock_khz, decode_sys_clock_khz, 0},
 };
 
 static bool param_len_matches_type(uint8_t type, uint8_t len)
@@ -271,6 +274,7 @@ void prism_params_set_defaults(prism_params_t *params)
     params->adc2_gain = 0;
     params->adc2_offset = 0;
     params->exposure_ticks = 1404;
+    params->sys_clock_khz = 125000;
 }
 
 bool prism_params_load(prism_params_t *params)

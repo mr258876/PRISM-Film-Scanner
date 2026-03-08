@@ -261,26 +261,37 @@ Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. Th
 | 45779(-1)     |            |               | (MOS delay)      | Exit Stall State | Exit Stall State |                     |
 | 45780(0)      | 0          | 0             | S0               | delay 1/3        | delay 1/3        | 1                   |
 
-After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first. Then we may conclude that, for each line of scan, it takes 45780 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45636 clocks.
+After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45780 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45636 clocks.
 
 For a full timing sequence, please check [State Machine Sequence.xlsx](<State Machine Sequence.xlsx>).
 
 ### Exposure Time Control
 
-Calculate the same way as the timing table above, in current settings, we need 45636 clocks each scan row (exclude expsorure ticks).
+Following the timing table above, in current settings, we need 45636 clocks each scan row (exclude expsorure ticks).
+
+These timing numbers assume the default `125MHz` RP2040 system clock. If you store a different `prism.sys_clock_khz` value through the control interface, the firmware reapplies that frequency on boot and the real-time exposure/readout durations scale with the new clock.
 
 And here is a quick lookup table if you want to change line exposure time.
 
-| exposure ticks | row clock cycles | time per frame (ms) | shutter speed   | data rate     |
-| -------------- | ---------------- | ------------------- | --------------- | ------------- |
-| ~~0~~          | ~~45648~~        | ~~0.365184~~        | ~~1/2738.3456~~ | N/A           |
-| 11             | 45780            | 0.36624             | 1/2730.45       | ~41MiB/s      |
-| 363            | 50004            | 0.400032            | 1/2499.8        | ~37MiB/s      |
-| 1404           | 62496            | 0.499968            | 1/2000.1280     | ~30MiB/s      |
-| 2706           | 78120            | 0.62496             | 1/1600.1024     | Notyet tested |
-| 4529           | 99996            | 0.799968            | 1/1250.05       | Notyet tested |
-| 6613           | 125004           | 1.000032            | 1/999.968       | Notyet tested |
+| exposure ticks | row clock cycles | time per frame (ms) | shutter speed   | data rate   |
+| -------------- | ---------------- | ------------------- | --------------- | ----------- |
+| ~~0~~          | ~~45648~~        | ~~0.365184~~        | ~~1/2738.3456~~ | N/A         |
+| 11             | 45780            | 0.36624             | 1/2730.45       | ~40.5MiB/s  |
+| 363            | 50004            | 0.400032            | 1/2499.8        | ~36.65MiB/s |
+| 1404           | 62496            | 0.499968            | 1/2000.1280     | ~29.62MiB/s |
+| 2706           | 78120            | 0.62496             | 1/1600.1024     | ~23.62MiB/s |
+| 4529           | 99996            | 0.799968            | 1/1250.05       | ~18.38MiB/s |
+| 6613           | 125004           | 1.000032            | 1/999.968       | ~14.68MiB/s |
 
+### Overclocking
+
+The RP2040 could be easily overclocked, and no extra modifications required as clock speed <= 270Mhz. However, pushing the clock speed too hard will damage our timing design, and ADC may not able to sample correct voltage. This section is just for a record, it is not recommended to overclock in actual use.
+
+| clock speed | exposure ticks | row clock cycles | time per frame (ms) | shutter speed | data rate   |
+| ----------- | -------------- | ---------------- | ------------------- | ------------- | ----------- |
+| 125Mhz      | 10             | 45768            | 0.36614             | 1/2730.45     | ~40.59MiB/s |
+| 133MHz      | 11             | 45780            | 0.34421             | 1/2905.20     | ~43.66MiB/s |
+| 135MHz      | 11             | 45780            | 0.33911             | 1/2948.89     | ~44.38MiB/s |
 
 ## Conclusion
 

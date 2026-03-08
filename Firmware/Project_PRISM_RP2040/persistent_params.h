@@ -15,6 +15,7 @@ typedef struct {
     uint16_t adc2_gain;
     uint16_t adc2_offset;
     uint16_t exposure_ticks;
+    uint32_t sys_clock_khz;
 } prism_params_t;
 
 void prism_params_set_defaults(prism_params_t *params);

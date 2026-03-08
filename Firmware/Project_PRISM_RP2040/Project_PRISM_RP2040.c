@@ -7,6 +7,7 @@
 #include "pico/multicore.h"
 #include "pico/flash.h"
 #include "hardware/pio.h"
+#include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "hardware/sync.h"
@@ -25,6 +26,9 @@
 #define PRISM_CDS_CYCLES_PER_LINE 3796UL
 #define PRISM_FIFO_CYCLES_PER_LINE 7593UL
 #define PRISM_BYTES_PER_LINE 15188UL + 2UL  // Extra 2 bytes when judging manual flush
+#define PRISM_DEFAULT_SYS_CLOCK_KHZ 125000u
+#define PRISM_MIN_SYS_CLOCK_KHZ 125000u
+#define PRISM_MAX_SYS_CLOCK_KHZ 200000u
 
 static prism_params_t g_params;
 static uint32_t g_scan_lines = 1;
@@ -58,11 +62,47 @@ static uint32_t g_scan_dma_buf_sm0[SCAN_DMA_BANKS][SCAN_DMA_CHUNK_LINES];
 static uint32_t g_scan_dma_buf_sm1[SCAN_DMA_BANKS][SCAN_DMA_CHUNK_LINES];
 static uint32_t g_scan_dma_buf_sm2[SCAN_DMA_BANKS][SCAN_DMA_CHUNK_LINES];
 
+static void timing_gen_reinit(void);
+static void warmup_dma_fill_buffer(void);
+
 static void normalize_params(prism_params_t *params)
 {
     if (params->exposure_ticks == 0)
     {
         params->exposure_ticks = 1404;  // 1/2000s
+    }
+
+    if (params->sys_clock_khz < PRISM_MIN_SYS_CLOCK_KHZ ||
+        params->sys_clock_khz > PRISM_MAX_SYS_CLOCK_KHZ)
+    {
+        params->sys_clock_khz = PRISM_DEFAULT_SYS_CLOCK_KHZ;
+    }
+}
+
+static bool system_clock_supported_khz(uint32_t sys_clock_khz)
+{
+    uint vco = 0;
+    uint post_div1 = 0;
+    uint post_div2 = 0;
+    return check_sys_clock_khz(sys_clock_khz, &vco, &post_div1, &post_div2);
+}
+
+static bool apply_system_clock_khz(uint32_t sys_clock_khz)
+{
+    if (!system_clock_supported_khz(sys_clock_khz))
+    {
+        return false;
+    }
+
+    return set_sys_clock_khz(sys_clock_khz, false);
+}
+
+static void reinit_runtime_after_clock_change(void)
+{
+    timing_gen_reinit();
+    if (g_warmup_active)
+    {
+        warmup_dma_fill_buffer();
     }
 }
 
@@ -492,12 +532,14 @@ static void process_usb_command(const usb_command_t *cmd)
             }
 
             normalize_params(&g_params);
-            apply_ad9826_params(&g_params);
-            timing_gen_reinit();
-            if (g_warmup_active)
+            if (!apply_system_clock_khz(g_params.sys_clock_khz))
             {
-                warmup_dma_fill_buffer();
+                (void)prism_param_set_by_hash(&g_params, cmd->key_hash, current_type, current_len, current_data);
+                rsp.status = USB_STATUS_PAYLOAD_INVALID;
+                break;
             }
+            apply_ad9826_params(&g_params);
+            reinit_runtime_after_clock_change();
             if (!prism_params_save(&g_params))
             {
                 rsp.status = USB_STATUS_FLASH_FAIL;
@@ -564,6 +606,7 @@ int main()
     prism_params_set_defaults(&g_params);
     (void)prism_params_load(&g_params);
     normalize_params(&g_params);
+    (void)apply_system_clock_khz(g_params.sys_clock_khz);
 
     apply_ad9826_params(&g_params);
     timing_gen_init();

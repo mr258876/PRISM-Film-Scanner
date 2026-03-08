@@ -157,6 +157,7 @@ The current firmware exposes these persisted parameters through the hash-based p
 - `prism.adc2.gain` - `U16`
 - `prism.adc2.offset` - `U16`
 - `prism.exposure_ticks` - `U16`
+- `prism.sys_clock_khz` - `U32`
 
 Default values currently compiled into firmware:
 
@@ -165,6 +166,9 @@ Default values currently compiled into firmware:
 - `prism.adc2.gain = 0`
 - `prism.adc2.offset = 0`
 - `prism.exposure_ticks = 1404`
+- `prism.sys_clock_khz = 125000`
+
+`prism.sys_clock_khz` controls the RP2040 system clock in kHz. The default is `125000`, and if a host stores a higher valid value, the firmware reapplies it during boot before initializing the timing generators.
 
 The firmware hashes parameter keys internally with 32-bit FNV-1a. A host application must calculate the same hash for the string key before calling the get/set commands.
 
