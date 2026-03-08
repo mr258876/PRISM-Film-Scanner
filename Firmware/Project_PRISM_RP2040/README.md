@@ -40,7 +40,7 @@ In our project, we need to generate clock signals for TCD1708 CCD, 2xAD9826 ADCs
 
 Instead of 1 SM per chip, we use SM1 to generate clocks for both ADCs, since their timings are identical, and we may also save a SM to generate IFCLK for USB FIFO buffer, which is a CY7C68013A in synchronous mode. 
 
-#### SM1
+#### SM0
 ```asm
 .program line_sig_generate
 .side_set 1
