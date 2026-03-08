@@ -9,6 +9,9 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 
 ## Progress Milestones
 - Finished - Linear CCD sensor proof of concept (Mar 7, 2026)
+  ![Imaging Board PoC](/Resources/Imaging_Board_PoC.png)
+
+  *Forgive the poor soldering
 - In progress - Control software
 - In progress - Lens system
 - In progress - Synchronized RGB light source
@@ -45,7 +48,7 @@ At the current stage, the repository is best treated as a prototype bring-up pac
 
 ## If You're Curious
 - [Hardware Requirements and Bring-up](Hardware/README.md)
-- [Host Software README](Host%20Software/README.md)
+- [Host Software README](https://github.com/mr258876/PRISM-Utility/blob/main/README.md)
 - [Timing Sequence Design of Imaging Subsystem - Readme of RP2040 Firmware](Firmware/Project_PRISM_RP2040/README.md)
 - [RP2040 Control Interface](Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md)
 
