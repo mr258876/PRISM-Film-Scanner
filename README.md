@@ -9,7 +9,7 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 
 ## Progress Milestones
 - Finished - Linear CCD sensor proof of concept (Mar 7, 2026)
-  ![Imaging Board PoC](/Resources/Imaging_Board_PoC.png)
+  ![Imaging Board PoC](/Resources/Imaging_Board_PoC.jpg)
 
   *Forgive the poor soldering
 - In progress - Control software
@@ -24,17 +24,21 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 At the current stage, the repository is best treated as a prototype bring-up package instead of a finished end-user product. To reproduce the current milestone, you need the hardware in `Hardware/`, the RP2040 timing-generator firmware, the CY7C68013A USB FIFO firmware, and the Windows host utility in `Host Software/`.
 
 1. Review the hardware package in `Hardware/` and prepare a board that matches the committed schematic and Gerber files.
-2. Build and flash the RP2040 firmware in `Firmware/Project_PRISM_RP2040/`.
-   - The documented workflow is Windows + VSCode + the `Raspberry Pi Pico` extension.
-   - See `Firmware/Project_PRISM_RP2040/README.md` for the timing-design notes and build entry point.
-3. Build and flash the CY7C68013A firmware in `Firmware/Project_PRISM_CY7C68013A/`.
-   - This firmware depends on vendor files from the Infineon FX2LP SDK and is not fully self-contained in this repository.
-   - See `Firmware/Project_PRISM_CY7C68013A/README.md` for the required SDK files and EEPROM flashing steps.
-4. Initialize the host software submodule if needed and build the desktop utility in `Host Software/`.
+2. Flash or build firmware for both RP2040 and CY7C68013A.
+   - Flash precompiled firmware
+      - See [Firmware Readme](/Firmware/README.md)
+   - or build the firmware yourself
+      *  Build and flash the RP2040 firmware in `Firmware/Project_PRISM_RP2040/`.
+         - The documented workflow is Windows + VSCode + the `Raspberry Pi Pico` extension.
+         - See `Firmware/Project_PRISM_RP2040/README.md` for the timing-design notes and build entry point.
+      * Build and flash the CY7C68013A firmware in `Firmware/Project_PRISM_CY7C68013A/`.
+         - This firmware depends on vendor files from the Infineon FX2LP SDK and is not fully self-contained in this repository.
+         - See `Firmware/Project_PRISM_CY7C68013A/README.md` for the required SDK files and EEPROM flashing steps.
+3. Initialize the host software submodule if needed and build the desktop utility in `Host Software/`.
    - If you cloned without submodules, run `git submodule update --init --recursive`.
    - See `Host Software/README.md` for Windows, .NET, and Visual Studio requirements.
-5. Connect the assembled scanner electronics to the host PC over USB and verify that the CY7C68013A FIFO buffer and the RP2040 control interface enumerate.
-6. Use the host utility or your own tooling against the RP2040 control interface to configure scan parameters and start bring-up.
+4. Connect the assembled scanner electronics to the host PC over USB and verify that the CY7C68013A FIFO buffer and the RP2040 control interface enumerate.
+5. Use the host utility or your own tooling against the RP2040 control interface to configure scan parameters and start bring-up.
    - Command and frame definitions are documented in `Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md`.
 
 
