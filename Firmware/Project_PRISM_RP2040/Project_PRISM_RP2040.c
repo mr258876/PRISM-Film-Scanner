@@ -22,10 +22,10 @@
 #include "persistent_params.h"
 #include "usb_task.h"
 
-#define PRISM_PIXEL_CYCLES_PER_LINE 3796UL
-#define PRISM_CDS_CYCLES_PER_LINE 3796UL
-#define PRISM_FIFO_CYCLES_PER_LINE 7593UL
-#define PRISM_BYTES_PER_LINE 15188UL + 2UL  // Extra 2 bytes when judging manual flush
+#define PRISM_PIXEL_CYCLES_PER_LINE 3800UL
+#define PRISM_CDS_CYCLES_PER_LINE 3800UL
+#define PRISM_FIFO_CYCLES_PER_LINE 7601UL
+#define PRISM_BYTES_PER_LINE 15204UL + 2UL  // Extra 2 bytes when judging manual flush
 #define PRISM_DEFAULT_SYS_CLOCK_KHZ 125000u
 #define PRISM_MIN_SYS_CLOCK_KHZ 125000u
 #define PRISM_MAX_SYS_CLOCK_KHZ 200000u
