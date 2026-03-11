@@ -142,7 +142,7 @@ fifo_line_sync_end:
 .wrap
 ```
 
-Program of SM2 reads 2x16 bits data into register `y` and `x` seperately in each row. Register `x` works as pixel loop counter like SM0 and SM1, but its value is 7601(3801*2-1) instead of 3800, since our ADCs are sampling CCD outputs into 16-bit values. Register `y` is an indicator of manual packet send. The USB buffer had been configured to send a package each time it got 512 bytes, however, our ADCs gives 15190 bytes (7595 pixels, 7594 row pixels + extra 2 bytes when exiting pixel loop, we don't have enough time to pull `SLWR` high), which could not be divided by 512. Thus, we need this indicator to send the extra bytes everytime we want to end a transaction.
+Program of SM2 reads 2x16 bits data into register `y` and `x` seperately in each row. Register `x` works as pixel loop counter like SM0 and SM1, but its value is 7601(3801*2-1) instead of 3800, since our ADCs are sampling CCD outputs into 16-bit values. Register `y` is an indicator of manual packet send. The USB buffer had been configured to send a package each time it got 512 bytes, however, our ADCs gives 15206 bytes (7603 words, 7602 row words + extra 2 bytes when exiting pixel loop, we don't have enough time to pull `SLWR` high), which could not be divided by 512. Thus, we need this indicator to send the extra bytes everytime we want to end a transaction.
 
 You may have also noticed, SM2 is assigned pin 19 & 21 for `SLWR` and `PKTEND` signal, but we are using a 3-bit value in side-set, in which bit-0 is `SLWR` and bit-2 is `PKTEND`. This is due to PIO SMs could only be assigned with continous pin ranges, and we have to put pin 20 here and ignore it. In fact, this is a mistake, pin 19 and pin 20, `SLWR` and `IFCLK` shuold have changed their position in curcit design, but later we found the board is still running, and we do need another SM for a freely running `IFCLK`, so it's kept here.
 
@@ -276,7 +276,7 @@ And here is a quick lookup table if you want to change line exposure time.
 | exposure ticks | row clock cycles | time per frame (ms) | shutter speed   | data rate   |
 | -------------- | ---------------- | ------------------- | --------------- | ----------- |
 | ~~0~~          | ~~45648~~        | ~~0.365184~~        | ~~1/2738.3456~~ | N/A         |
-| 10             | 45780            | 0.36624             | 1/2730.45       | ~40.81MiB/s  |
+| 10             | 45780            | 0.36624             | 1/2730.45       | ~40.81MiB/s |
 | 363            | 50004            | 0.400032            | 1/2499.8        | ~36.65MiB/s |
 | 1404           | 62496            | 0.499968            | 1/2000.1280     | ~29.62MiB/s |
 | 2706           | 78120            | 0.62496             | 1/1600.1024     | ~23.62MiB/s |
@@ -295,6 +295,15 @@ The RP2040 could be easily overclocked, and no extra modifications required as c
 
 ## Conclusion
 
-Thanks for reading, and I hope this article could help you in your development. 
+This project shows that RP2040 can be used as a practical high-speed timing generator for CCD imaging, without relying on an FPGA. By coordinating four PIO state machines, Project PRISM is able to generate CCD, ADC, and USB FIFO timing in a fully synchronized way, reaching up to 20.5 MSPS in the current design.
 
-The PIO in RP2040/RP2350 is really a powerful peripheral, and it makes many projects with pricise timing controls now possible. I hope to see more MCUs with similar feature avaliable on market in the future.
+The most important takeaway is not only the final speed, but also the method: careful instruction-level timing design, explicit state machine synchronization with IRQs, and leaving enough timing margin for external devices such as MOS drivers, ADCs, and USB FIFO logic. In other words, PIO is powerful enough for this class of problem, but only when the whole signal chain is considered together instead of treating PIO code in isolation.
+
+There are still limitations in the current implementation, especially timing margin at higher clock speeds, hardware pin-assignment compromises, and the lack of more automated verification for long timing sequences. Future work could include cleaner hardware routing, higher-clock validation, and better tooling for timing simulation or visualization.
+
+Even so, this project demonstrates that modern MCUs with deterministic IO peripherals can cover a space that previously felt FPGA-only. I hope this write-up can serve as both a reference for this firmware and a useful example for others working on high-speed sensor timing with RP2040/RP2350.
+
+## Future Work
+
+- Improve PCB pin mapping to remove current routing compromises and reduce dependence on software workarounds.
+- Measure image-quality impact, data integrity, and thermal behavior under different clock and exposure settings.

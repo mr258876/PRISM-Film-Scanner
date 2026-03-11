@@ -63,6 +63,8 @@ void TD_Init(void) // Called once at startup
 	// External clock, 48 MHz, Synchronous Mode, Slave FIFO interface
 	IFCONFIG = 0x43; // 0b01000011
 	SYNCDELAY;
+	REVCTL = 0x03;       // REVCTL.0 and REVCTL.1 to set to 1
+	SYNCDELAY;
 
 	// Default interface uses endpoint 2, zero the valid bit on all others
 	// Just using endpoint 2, zero the valid bit on all others
@@ -94,7 +96,11 @@ void TD_Init(void) // Called once at startup
 	SYNCDELAY;		  //
 
 	// Set the FIFO configuration for the used endpoints
-	EP2FIFOCFG = 0x0D; // AUTOIN=1, ZEROLENIN=1, WORDWIDE=1
+	EP2FIFOCFG = 0x0D; //  AUTOOUT=0, AUTOIN=1, ZEROLEN=1, WORDWIDE=1
+	SYNCDELAY;
+	EP2AUTOINLENH = 0x02; //  Auto-commit 512-byte packets
+	SYNCDELAY;
+	EP2AUTOINLENL = 0x00;
 	SYNCDELAY;
 
 	Rwuen = TRUE; // Enable remote-wakeup
