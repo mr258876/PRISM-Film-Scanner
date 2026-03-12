@@ -4,6 +4,7 @@
  */
 
 #include "persistent_params.h"
+#include "prism_defaults.h"
 
 #include <string.h>
 
@@ -14,6 +15,9 @@
 #define PRISM_PARAM_STORE_MAGIC     0x50535452u
 #define PRISM_PARAM_STORE_VERSION   1u
 #define PRISM_PARAM_TABLE_SLOTS     64u
+
+#define PRISM_FLASH_ERASED_U16      0xFFFFu
+#define PRISM_FLASH_ERASED_U32      0xFFFFFFFFu
 
 #define PRISM_PARAM_TYPE_U8         1u
 #define PRISM_PARAM_TYPE_U16        2u
@@ -203,7 +207,7 @@ static uint32_t slot_crc(const prism_param_slot_t *slot)
 
 static bool slot_valid(const prism_param_slot_t *slot)
 {
-    if (slot->key_hash == 0xFFFFFFFFu) {
+    if (slot->key_hash == PRISM_FLASH_ERASED_U32) {
         return false;
     }
     if (!param_len_matches_type(slot->type, slot->len)) {
@@ -229,7 +233,7 @@ static bool find_slot_index(const prism_param_slot_t *slots, uint32_t key_hash, 
         uint32_t idx = (start + i) % PRISM_PARAM_TABLE_SLOTS;
         const prism_param_slot_t *slot = &slots[idx];
 
-        if (slot->key_hash == 0xFFFFFFFFu) {
+        if (slot->key_hash == PRISM_FLASH_ERASED_U32) {
             return false;
         }
         if (slot_valid(slot) && slot->key_hash == key_hash) {
@@ -245,7 +249,7 @@ static bool insert_slot(prism_param_slot_t *slots, prism_param_slot_t *entry)
     uint32_t start = entry->key_hash % PRISM_PARAM_TABLE_SLOTS;
     for (uint32_t i = 0; i < PRISM_PARAM_TABLE_SLOTS; i++) {
         uint32_t idx = (start + i) % PRISM_PARAM_TABLE_SLOTS;
-        if (slots[idx].key_hash == 0xFFFFFFFFu) {
+        if (slots[idx].key_hash == PRISM_FLASH_ERASED_U32) {
             slots[idx] = *entry;
             return true;
         }
@@ -273,8 +277,8 @@ void prism_params_set_defaults(prism_params_t *params)
     params->adc1_offset = 0;
     params->adc2_gain = 0;
     params->adc2_offset = 0;
-    params->exposure_ticks = 1404;
-    params->sys_clock_khz = 125000;
+    params->exposure_ticks = PRISM_DEFAULT_EXPOSURE_TICKS;
+    params->sys_clock_khz = PRISM_DEFAULT_SYS_CLOCK_KHZ;
 }
 
 bool prism_params_load(prism_params_t *params)
@@ -324,8 +328,8 @@ bool prism_params_save(const prism_params_t *params)
     header->magic = PRISM_PARAM_STORE_MAGIC;
     header->version = PRISM_PARAM_STORE_VERSION;
     header->slot_count = PRISM_PARAM_TABLE_SLOTS;
-    header->reserved0 = 0xFFFFFFFFu;
-    header->reserved1 = 0xFFFFFFFFu;
+    header->reserved0 = PRISM_FLASH_ERASED_U32;
+    header->reserved1 = PRISM_FLASH_ERASED_U32;
 
     prism_param_slot_t *slots = store_slots_mut(ctx.sector_buf);
 
@@ -334,7 +338,7 @@ bool prism_params_save(const prism_params_t *params)
             .key_hash = g_param_desc[i].hash,
             .type = g_param_desc[i].type,
             .len = g_param_desc[i].len,
-            .reserved = 0xFFFFu,
+            .reserved = PRISM_FLASH_ERASED_U16,
             .value = g_param_desc[i].encode_scalar(params),
             .crc32 = 0,
         };

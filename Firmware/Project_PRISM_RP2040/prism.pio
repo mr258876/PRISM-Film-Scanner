@@ -26,8 +26,8 @@ line_sig_init:                                  ; 54321(0) <- GPIO 5-0
 sh_high_loop:                                   ; ┌
     jmp x-- sh_high_loop    [11]    side 1      ; | LLLLH(H), SH high (96ns)*(x+1)
                                                 ; └-> >= 1000ns in total (t3)
-    out x, 16               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3796 (128ns)
-    irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # idk why it only need 1 cycle delay, should be 2 cycles in theory
+    out x, 16               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3800 (128ns)
+    irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # only need 1 cycle delay, another 1 hidden before wareup. See readme
                                                 ; └-> >= 200ns in total (t19)
     irq clear 4             [0]     side 0      ; -2 clear IRQ4, for state machine syncing (expected 16ns, -8ns for MOSFET delay)
 line_sig_loop:
@@ -57,7 +57,7 @@ line_sig_loop:
 .wrap_target
 cds_line_init:
     set pins 0b1000         [0] side 0b000      ;       Exposure Sync
-    out x, 32               [0] side 0b000      ;       Load counter value=3796
+    out x, 32               [0] side 0b000      ;       Load counter value=3800
     irq wait 4              [3] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
                                                 ; 0     Detects IRQ clear, exit stall state
                                                 ; 1   
@@ -92,7 +92,7 @@ fifo_line_sync_init:
                                                  ; 0
                                                  ; 1
                                                  ; 2
-    out x, 16                   [2] side 0b100   ; 3        Load counter value=3797*2-1=7593, LLH SLWR low, prepare for bus sample     CLK LLL
+    out x, 16                   [2] side 0b100   ; 3        Load counter value=3801*2-1=7601, LLH SLWR low, prepare for bus sample     CLK LLL
                                                  ; 4
                                                  ; 5
 fifo_line_sync_loop:                             ;       GPIO 19(20)21

@@ -90,8 +90,7 @@ uint16_t ad9826_read_data(char clk_pin, char data_pin, char load_pin, char addr)
     {
         // 9 bit data
         gpio_put(clk_pin, 1);           // Rise SCLK
-        result |= gpio_get(data_pin);   // Sample 1 bit data
-        result = result << 1;
+        result = (uint16_t)((result << 1) | (gpio_get(data_pin) & 0x1u));
         sleep_us(1);
         gpio_put(clk_pin, 0);
         sleep_us(1);

@@ -12,6 +12,24 @@
 #include "pico/util/queue.h"
 #include "tusb.h"
 
+#define USB_TASK_QUEUE_DEPTH 64u
+#define USB_FRAME_MAX_PAYLOAD CFG_TUD_VENDOR_EPSIZE
+#define USB_FRAME_LEN_FIELD_SIZE 2u
+#define USB_GET_PARAM_PAYLOAD_LEN 4u
+#define USB_SET_PARAM_FIXED_PAYLOAD_LEN 6u
+#define USB_SET_PARAM_TYPE_OFFSET 4u
+#define USB_SET_PARAM_LEN_OFFSET 5u
+#define USB_SET_PARAM_DATA_OFFSET 6u
+#define USB_SCAN_STATUS_PAYLOAD_LEN 8u
+#define USB_RESPONSE_HEADER_SIZE 5u
+
+typedef enum {
+    USB_RX_STATE_WAIT_MARKER = 0,
+    USB_RX_STATE_WAIT_OPCODE,
+    USB_RX_STATE_WAIT_LEN,
+    USB_RX_STATE_WAIT_PAYLOAD
+} usb_rx_state_t;
+
 static queue_t usb_rx_queue;
 static queue_t usb_tx_queue;
 
@@ -51,10 +69,118 @@ static void push_status_response(uint8_t opcode, uint8_t status)
     (void)queue_try_add(&usb_tx_queue, &rsp);
 }
 
+static bool is_valid_frame_opcode(uint8_t opcode)
+{
+    switch (opcode)
+    {
+    case USB_CMD_GET_PARAM_BY_HASH:
+    case USB_CMD_SET_PARAM_BY_HASH:
+    case USB_CMD_START_SCAN:
+    case USB_CMD_SET_SCAN_LINES:
+    case USB_CMD_STOP_SCAN:
+    case USB_CMD_START_WARMUP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool is_valid_frame_len(uint8_t opcode, uint16_t frame_len)
+{
+    switch (opcode)
+    {
+    case USB_CMD_START_SCAN:
+    case USB_CMD_STOP_SCAN:
+    case USB_CMD_START_WARMUP:
+        return frame_len == 0;
+    case USB_CMD_GET_PARAM_BY_HASH:
+    case USB_CMD_SET_SCAN_LINES:
+        return frame_len == USB_GET_PARAM_PAYLOAD_LEN;
+    case USB_CMD_SET_PARAM_BY_HASH:
+        return frame_len >= USB_SET_PARAM_FIXED_PAYLOAD_LEN &&
+               frame_len <= (uint16_t)(USB_SET_PARAM_FIXED_PAYLOAD_LEN + USB_PARAM_MAX_DATA_LEN);
+    default:
+        return false;
+    }
+}
+
+static void reset_rx_frame(usb_rx_state_t *state,
+                           uint8_t *frame_opcode,
+                           uint16_t *frame_len,
+                           uint8_t *frame_pos,
+                           uint8_t *frame_len_pos)
+{
+    *state = USB_RX_STATE_WAIT_MARKER;
+    *frame_opcode = 0;
+    *frame_len = 0;
+    *frame_pos = 0;
+    *frame_len_pos = 0;
+}
+
+static void try_queue_zero_payload_command(uint8_t *frame_opcode,
+                                           usb_rx_state_t *state,
+                                           uint8_t *frame_pos,
+                                           uint8_t *frame_len_pos,
+                                           uint16_t *frame_len)
+{
+    usb_command_t cmd = {
+        .type = *frame_opcode,
+    };
+    if (!queue_try_add(&usb_rx_queue, &cmd))
+    {
+        push_status_response(*frame_opcode, USB_STATUS_QUEUE_FULL);
+    }
+
+    reset_rx_frame(state, frame_opcode, frame_len, frame_pos, frame_len_pos);
+}
+
+static void try_queue_payload_command(uint8_t *frame_opcode,
+                                      uint16_t *frame_len,
+                                      const uint8_t *frame_payload,
+                                      usb_rx_state_t *state,
+                                      uint8_t *frame_pos,
+                                      uint8_t *frame_len_pos)
+{
+    usb_command_t cmd = {
+        .type = *frame_opcode,
+    };
+
+    switch (*frame_opcode)
+    {
+    case USB_CMD_GET_PARAM_BY_HASH:
+        cmd.key_hash = decode_u32_le(frame_payload);
+        break;
+    case USB_CMD_SET_PARAM_BY_HASH:
+        cmd.key_hash = decode_u32_le(frame_payload);
+        cmd.param_type = frame_payload[USB_SET_PARAM_TYPE_OFFSET];
+        cmd.param_len = frame_payload[USB_SET_PARAM_LEN_OFFSET];
+        if ((uint16_t)(cmd.param_len + USB_SET_PARAM_FIXED_PAYLOAD_LEN) != *frame_len || cmd.param_len > USB_PARAM_MAX_DATA_LEN)
+        {
+            push_status_response(*frame_opcode, USB_STATUS_PAYLOAD_INVALID);
+            reset_rx_frame(state, frame_opcode, frame_len, frame_pos, frame_len_pos);
+            return;
+        }
+        memcpy(cmd.param_data, &frame_payload[USB_SET_PARAM_DATA_OFFSET], cmd.param_len);
+        break;
+    case USB_CMD_SET_SCAN_LINES:
+        cmd.scan_lines = decode_u32_le(frame_payload);
+        break;
+    default:
+        break;
+    }
+
+    if (!queue_try_add(&usb_rx_queue, &cmd))
+    {
+        push_status_response(*frame_opcode, USB_STATUS_QUEUE_FULL);
+    }
+
+    reset_rx_frame(state, frame_opcode, frame_len, frame_pos, frame_len_pos);
+}
+
 void usb_task_init(void)
 {
-    queue_init(&usb_rx_queue, sizeof(usb_command_t), 64);
-    queue_init(&usb_tx_queue, sizeof(usb_response_t), 64);
+    queue_init(&usb_rx_queue, sizeof(usb_command_t), USB_TASK_QUEUE_DEPTH);
+    queue_init(&usb_tx_queue, sizeof(usb_response_t), USB_TASK_QUEUE_DEPTH);
 }
 
 bool usb_task_try_recv(usb_command_t *cmd)
@@ -76,13 +202,13 @@ void usb_task_core1_main(void)
     tusb_init();
 
     uint8_t rx_buf[CFG_TUD_VENDOR_EPSIZE];
+    usb_rx_state_t rx_state = USB_RX_STATE_WAIT_MARKER;
     uint8_t frame_opcode = 0;
     uint16_t frame_len = 0;
     uint8_t frame_pos = 0;
-    uint8_t frame_payload[64];
-    bool frame_wait_opcode = false;
+    uint8_t frame_payload[USB_FRAME_MAX_PAYLOAD];
     uint8_t frame_len_pos = 0;
-    uint8_t frame_len_bytes[2] = {0};
+    uint8_t frame_len_bytes[USB_FRAME_LEN_FIELD_SIZE] = {0};
 
     while (!tud_mounted())
     {
@@ -100,141 +226,69 @@ void usb_task_core1_main(void)
             {
                 uint8_t byte = rx_buf[i];
 
-                if (i == 0)
+                switch (rx_state)
                 {
-                    if (byte != USB_FRAME_IN_MARKER)
+                case USB_RX_STATE_WAIT_MARKER:
+                    if (byte == USB_FRAME_IN_MARKER)
                     {
-                        push_status_response(frame_opcode, USB_STATUS_BAD_FRAME);
-                        i = count; // break out of loop
-                        continue;
-                    }
-                    else
-                    {
-                        frame_wait_opcode = true;
-                        frame_len_pos = 0;
+                        rx_state = USB_RX_STATE_WAIT_OPCODE;
+                        frame_opcode = 0;
+                        frame_len = 0;
                         frame_pos = 0;
-                        continue;
+                        frame_len_pos = 0;
                     }
-                }
+                    break;
 
-                if (frame_wait_opcode)
-                {
+                case USB_RX_STATE_WAIT_OPCODE:
                     frame_opcode = byte;
-                    switch (frame_opcode)
+                    if (!is_valid_frame_opcode(frame_opcode))
                     {
-                    case USB_CMD_GET_PARAM_BY_HASH:
-                    case USB_CMD_SET_PARAM_BY_HASH:
-                    case USB_CMD_START_SCAN:
-                    case USB_CMD_SET_SCAN_LINES:
-                    case USB_CMD_STOP_SCAN:
-                    case USB_CMD_START_WARMUP:
-                        break;
-                    default:
                         push_status_response(frame_opcode, USB_STATUS_BAD_FRAME);
-                        i = count; // break out of loop
-                        continue;
+                        reset_rx_frame(&rx_state, &frame_opcode, &frame_len, &frame_pos, &frame_len_pos);
+                        if (byte == USB_FRAME_IN_MARKER)
+                        {
+                            rx_state = USB_RX_STATE_WAIT_OPCODE;
+                        }
+                        break;
                     }
-                    frame_wait_opcode = false;
+
+                    rx_state = USB_RX_STATE_WAIT_LEN;
                     frame_len_pos = 0;
                     frame_pos = 0;
-                    continue;
-                }
+                    break;
 
-                if (frame_len_pos < 2)
-                {
+                case USB_RX_STATE_WAIT_LEN:
                     frame_len_bytes[frame_len_pos++] = byte;
-                    if (frame_len_pos < 2)
+                    if (frame_len_pos < USB_FRAME_LEN_FIELD_SIZE)
                     {
-                        continue;
+                        break;
                     }
 
                     frame_len = decode_u16_le(frame_len_bytes);
-
-                    bool len_valid = false;
-                    switch (frame_opcode)
-                    {
-                    case USB_CMD_START_SCAN:
-                    case USB_CMD_STOP_SCAN:
-                    case USB_CMD_START_WARMUP:
-                        len_valid = (frame_len == 0);
-                        break;
-                    case USB_CMD_GET_PARAM_BY_HASH:
-                    case USB_CMD_SET_SCAN_LINES:
-                        len_valid = (frame_len == 4);
-                        break;
-                    case USB_CMD_SET_PARAM_BY_HASH:
-                        len_valid = (frame_len >= 6 && frame_len <= (uint16_t)(6 + USB_PARAM_MAX_DATA_LEN));
-                        break;
-                    default:
-                        frame_len = 0;
-                        frame_len_pos = 0;
-                        continue;
-                    }
-
-                    if (!len_valid)
+                    if (!is_valid_frame_len(frame_opcode, frame_len))
                     {
                         push_status_response(frame_opcode, USB_STATUS_PAYLOAD_INVALID);
-                        frame_len = 0;
-                        frame_len_pos = 0;
-                        continue;
+                        reset_rx_frame(&rx_state, &frame_opcode, &frame_len, &frame_pos, &frame_len_pos);
+                        break;
                     }
 
                     if (frame_len == 0)
                     {
-                        usb_command_t cmd = {
-                            .type = frame_opcode,
-                        };
-                        if (!queue_try_add(&usb_rx_queue, &cmd))
-                        {
-                            push_status_response(frame_opcode, USB_STATUS_QUEUE_FULL);
-                        }
-                        frame_len_pos = 0;
+                        try_queue_zero_payload_command(&frame_opcode, &rx_state, &frame_pos, &frame_len_pos, &frame_len);
+                        break;
                     }
-                    continue;
-                }
 
-                if (frame_len > 0)
-                {
+                    rx_state = USB_RX_STATE_WAIT_PAYLOAD;
+                    frame_pos = 0;
+                    break;
+
+                case USB_RX_STATE_WAIT_PAYLOAD:
                     frame_payload[frame_pos++] = byte;
                     if (frame_pos >= frame_len)
                     {
-                        usb_command_t cmd = {
-                            .type = frame_opcode,
-                        };
-                        switch (frame_opcode)
-                        {
-                        case USB_CMD_GET_PARAM_BY_HASH:
-                            cmd.key_hash = decode_u32_le(frame_payload);
-                            break;
-                        case USB_CMD_SET_PARAM_BY_HASH:
-                            cmd.key_hash = decode_u32_le(frame_payload);
-                            cmd.param_type = frame_payload[4];
-                            cmd.param_len = frame_payload[5];
-                            if ((uint16_t)(cmd.param_len + 6u) != frame_len || cmd.param_len > USB_PARAM_MAX_DATA_LEN)
-                            {
-                                push_status_response(frame_opcode, USB_STATUS_PAYLOAD_INVALID);
-                                frame_len = 0;
-                                frame_len_pos = 0;
-                                continue;
-                            }
-                            memcpy(cmd.param_data, &frame_payload[6], cmd.param_len);
-                            break;
-                        case USB_CMD_SET_SCAN_LINES:
-                            cmd.scan_lines = decode_u32_le(frame_payload);
-                            break;
-
-                        default:
-                            break;
-                        }
-
-                        if (!queue_try_add(&usb_rx_queue, &cmd))
-                        {
-                            push_status_response(frame_opcode, USB_STATUS_QUEUE_FULL);
-                        }
-                        frame_len = 0;
-                        frame_len_pos = 0;
+                        try_queue_payload_command(&frame_opcode, &frame_len, frame_payload, &rx_state, &frame_pos, &frame_len_pos);
                     }
-                    continue;
+                    break;
                 }
             }
         }
@@ -248,31 +302,31 @@ void usb_task_core1_main(void)
                 break;
             }
 
-            uint8_t payload[64];
+            uint8_t payload[USB_FRAME_MAX_PAYLOAD];
             uint16_t payload_len = 0;
 
             if ((rsp.opcode == USB_CMD_GET_PARAM_BY_HASH || rsp.opcode == USB_CMD_SET_PARAM_BY_HASH) && rsp.status == USB_STATUS_OK)
             {
                 encode_u32_le(payload, rsp.key_hash);
-                payload[4] = rsp.param_type;
-                payload[5] = rsp.param_len;
+                payload[USB_SET_PARAM_TYPE_OFFSET] = rsp.param_type;
+                payload[USB_SET_PARAM_LEN_OFFSET] = rsp.param_len;
                 if (rsp.param_len > USB_PARAM_MAX_DATA_LEN)
                 {
                     continue;
                 }
-                memcpy(&payload[6], rsp.param_data, rsp.param_len);
-                payload_len = (uint16_t)(6 + rsp.param_len);
+                memcpy(&payload[USB_SET_PARAM_DATA_OFFSET], rsp.param_data, rsp.param_len);
+                payload_len = (uint16_t)(USB_SET_PARAM_FIXED_PAYLOAD_LEN + rsp.param_len);
             }
             else if (rsp.opcode == USB_CMD_START_SCAN || rsp.opcode == USB_CMD_SET_SCAN_LINES || rsp.opcode == USB_CMD_STOP_SCAN || rsp.opcode == USB_CMD_START_WARMUP)
             {
                 encode_u32_le(payload, rsp.target_scan_lines);
-                encode_u32_le(&payload[4], rsp.completed_scan_lines);
-                payload_len = 8;
+                encode_u32_le(&payload[USB_GET_PARAM_PAYLOAD_LEN], rsp.completed_scan_lines);
+                payload_len = USB_SCAN_STATUS_PAYLOAD_LEN;
             }
 
-            uint8_t header[5] = {USB_FRAME_OUT_MARKER, rsp.opcode, rsp.status, 0, 0};
+            uint8_t header[USB_RESPONSE_HEADER_SIZE] = {USB_FRAME_OUT_MARKER, rsp.opcode, rsp.status, 0, 0};
             encode_u16_le(&header[3], payload_len);
-            if (writable < (uint32_t)(5 + payload_len))
+            if (writable < (uint32_t)(USB_RESPONSE_HEADER_SIZE + payload_len))
             {
                 (void)queue_try_add(&usb_tx_queue, &rsp);
                 break;
@@ -283,7 +337,7 @@ void usb_task_core1_main(void)
             {
                 tud_vendor_write(payload, payload_len);
             }
-            writable -= (uint32_t)(5 + payload_len);
+            writable -= (uint32_t)(USB_RESPONSE_HEADER_SIZE + payload_len);
         }
         tud_vendor_write_flush();
     }

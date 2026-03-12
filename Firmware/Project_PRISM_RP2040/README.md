@@ -55,7 +55,7 @@ sh_high_loop:                                   ; ┌
     jmp x-- sh_high_loop    [11]    side 1      ; | LLLLH(H), SH high (96ns)*(x+1)
                                                 ; └-> >= 1000ns in total (t3)
     out x, 16               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3800 (128ns)
-    irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # idk why it only need 1 cycle delay, should be 2 cycles in theory
+    irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # only need 1 cycle delay, another 1 hidden before wareup. See readme
                                                 ; └-> >= 200ns in total (t19)
     irq clear 4             [0]     side 0      ; -2 clear IRQ4, for state machine syncing (expected 16ns, -8ns for MOSFET delay)
 line_sig_loop:
@@ -126,7 +126,7 @@ fifo_line_sync_init:
                                                  ; 0
                                                  ; 1
                                                  ; 2
-    out x, 16                   [2] side 0b100   ; 3        Load counter value=3797*2-1=7593, LLH SLWR low, prepare for bus sample     CLK LLL
+    out x, 16                   [2] side 0b100   ; 3        Load counter value=3801*2-1=7601, LLH SLWR low, prepare for bus sample     CLK LLL
                                                  ; 4
                                                  ; 5
 fifo_line_sync_loop:                             ;       GPIO 19(20)21
@@ -261,7 +261,7 @@ Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. Th
 | 45827(-1)     |            |               | (MOS delay)      | Exit Stall State | Exit Stall State |                     |
 | 45828(0)      | 0          | 0             | S0               | delay 1/3        | delay 1/3        | 1                   |
 
-After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45780 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45684 clocks.
+After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45828 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45684 clocks.
 
 For a full timing sequence, please check [State Machine Sequence.xlsx](<State Machine Sequence.xlsx>).
 
@@ -276,7 +276,7 @@ And here is a quick lookup table if you want to change line exposure time.
 | exposure ticks | row clock cycles | time per frame (ms) | shutter speed   | data rate   |
 | -------------- | ---------------- | ------------------- | --------------- | ----------- |
 | ~~0~~          | ~~45648~~        | ~~0.365184~~        | ~~1/2738.3456~~ | N/A         |
-| 10             | 45780            | 0.36624             | 1/2730.45       | ~40.81MiB/s |
+| 10             | 45816            | 0.36624             | 1/2730.45       | ~40.81MiB/s |
 | 363            | 50004            | 0.400032            | 1/2499.8        | ~36.65MiB/s |
 | 1404           | 62496            | 0.499968            | 1/2000.1280     | ~29.62MiB/s |
 | 2706           | 78120            | 0.62496             | 1/1600.1024     | ~23.62MiB/s |
@@ -289,9 +289,9 @@ The RP2040 could be easily overclocked, and no extra modifications required as c
 
 | clock speed | exposure ticks | row clock cycles | time per frame (ms) | shutter speed | data rate   |
 | ----------- | -------------- | ---------------- | ------------------- | ------------- | ----------- |
-| 125Mhz      | 10             | 45768            | 0.36614             | 1/2730.45     | ~40.59MiB/s |
-| 133MHz      | 11             | 45780            | 0.34421             | 1/2905.20     | ~43.66MiB/s |
-| 135MHz      | 11             | 45780            | 0.33911             | 1/2948.89     | ~44.38MiB/s |
+| 125Mhz      | 10             | 45816            | 0.36624             | 1/2730.45     | ~40.59MiB/s |
+| 133MHz      | 11             | 45828            | 0.34421             | 1/2905.20     | ~43.66MiB/s |
+| 135MHz      | 11             | 45828            | 0.33911             | 1/2948.89     | ~44.38MiB/s |
 
 ## Conclusion
 

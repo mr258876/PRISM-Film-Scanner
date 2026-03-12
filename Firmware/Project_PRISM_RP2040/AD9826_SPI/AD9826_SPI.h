@@ -6,6 +6,8 @@
 #ifndef _AD9826_SPI_H_
 #define _AD9826_SPI_H_
 
+#include "AD9826_Reg.h"
+
 typedef struct 
 {
     char adcclk_pin;

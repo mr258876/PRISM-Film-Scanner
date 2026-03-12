@@ -20,13 +20,13 @@
 #include "Pinouts.h"
 #include "AD9826_SPI/AD9826_SPI.h"
 #include "persistent_params.h"
+#include "prism_defaults.h"
 #include "usb_task.h"
 
 #define PRISM_PIXEL_CYCLES_PER_LINE 3800UL
 #define PRISM_CDS_CYCLES_PER_LINE 3800UL
 #define PRISM_FIFO_CYCLES_PER_LINE 7601UL
 #define PRISM_BYTES_PER_LINE (15204UL + 2UL)  // Extra 2 bytes when judging manual flush
-#define PRISM_DEFAULT_SYS_CLOCK_KHZ 125000u
 #define PRISM_MIN_SYS_CLOCK_KHZ 125000u
 #define PRISM_MAX_SYS_CLOCK_KHZ 200000u
 
@@ -69,7 +69,7 @@ static void normalize_params(prism_params_t *params)
 {
     if (params->exposure_ticks == 0)
     {
-        params->exposure_ticks = 1404;  // 1/2000s
+        params->exposure_ticks = PRISM_DEFAULT_EXPOSURE_TICKS;  // minimum exposure
     }
 
     if (params->sys_clock_khz < PRISM_MIN_SYS_CLOCK_KHZ ||
@@ -110,20 +110,85 @@ static void apply_ad9826_params(const prism_params_t *params)
 {
     AD9826_SPI_Handle adc1 = {ADC1_ADCCLK_PIN, ADC1_SPI_SCLK_PIN, ADC1_SPI_DATA_PIN, ADC1_SPI_LOAD_PIN};
     ad9826_spi_init_handle(&adc1);
-    ad9826_write_data_handle(&adc1, 0b000, 0b001011000); // Set 2V Input, 3CH Mode Off
-    ad9826_write_data_handle(&adc1, 0b001, 0b010010000); // Set RG Channel Off, B Channel On
-    ad9826_write_data_handle(&adc1, 0b100, params->adc1_gain & 0x01FFu);
-    ad9826_write_data_handle(&adc1, 0b111, params->adc1_offset & 0x01FFu);
+    ad9826_write_data_handle(&adc1, AD9826_REG_CONFIG, 0b001011000); // Set 2V Input, 3CH Mode Off
+    ad9826_write_data_handle(&adc1, AD9826_REG_MUX, 0b010010000); // Set RG Channel Off, B Channel On
+    ad9826_write_data_handle(&adc1, AD9826_REG_GAIN_B, params->adc1_gain & AD9826_REG_DATA_MASK);
+    ad9826_write_data_handle(&adc1, AD9826_REG_OFFSET_B, params->adc1_offset & AD9826_REG_DATA_MASK);
 
     AD9826_SPI_Handle adc2 = {ADC2_ADCCLK_PIN, ADC2_SPI_SCLK_PIN, ADC2_SPI_DATA_PIN, ADC2_SPI_LOAD_PIN};
     ad9826_spi_init_handle(&adc2);
-    ad9826_write_data_handle(&adc2, 0b000, 0b001011000); // Set 2V Input, 3CH Mode Off
-    ad9826_write_data_handle(&adc2, 0b001, 0b010100000); // Set RB Channel Off, G Channel On
-    ad9826_write_data_handle(&adc2, 0b011, params->adc2_gain & 0x01FFu);
-    ad9826_write_data_handle(&adc2, 0b110, params->adc2_offset & 0x01FFu);
+    ad9826_write_data_handle(&adc2, AD9826_REG_CONFIG, 0b001011000); // Set 2V Input, 3CH Mode Off
+    ad9826_write_data_handle(&adc2, AD9826_REG_MUX, 0b010100000); // Set RB Channel Off, G Channel On
+    ad9826_write_data_handle(&adc2, AD9826_REG_GAIN_G, params->adc2_gain & AD9826_REG_DATA_MASK);
+    ad9826_write_data_handle(&adc2, AD9826_REG_OFFSET_G, params->adc2_offset & AD9826_REG_DATA_MASK);
 
     ad9826_spi_deinit_handle(&adc1);
     ad9826_spi_deinit_handle(&adc2);
+}
+
+static void encode_u16_le_local(uint8_t *out, uint16_t value)
+{
+    out[0] = (uint8_t)(value & 0xFFu);
+    out[1] = (uint8_t)((value >> 8) & 0xFFu);
+}
+
+static bool try_read_ad9826_param_by_hash(uint32_t key_hash, uint8_t *type, uint8_t *len, uint8_t *value)
+{
+    static uint32_t adc1_gain_hash = 0;
+    static uint32_t adc1_offset_hash = 0;
+    static uint32_t adc2_gain_hash = 0;
+    static uint32_t adc2_offset_hash = 0;
+    static bool hashes_initialized = false;
+
+    if (!hashes_initialized)
+    {
+        adc1_gain_hash = prism_param_hash_key("prism.adc1.gain");
+        adc1_offset_hash = prism_param_hash_key("prism.adc1.offset");
+        adc2_gain_hash = prism_param_hash_key("prism.adc2.gain");
+        adc2_offset_hash = prism_param_hash_key("prism.adc2.offset");
+        hashes_initialized = true;
+    }
+
+    AD9826_SPI_Handle handle = {0};
+    uint16_t reg_value = 0;
+
+    if (key_hash == adc1_gain_hash)
+    {
+        handle = (AD9826_SPI_Handle){ADC1_ADCCLK_PIN, ADC1_SPI_SCLK_PIN, ADC1_SPI_DATA_PIN, ADC1_SPI_LOAD_PIN};
+        ad9826_spi_init_handle(&handle);
+        reg_value = ad9826_read_data_handle(&handle, AD9826_REG_GAIN_B) & AD9826_REG_DATA_MASK;
+        ad9826_spi_deinit_handle(&handle);
+    }
+    else if (key_hash == adc1_offset_hash)
+    {
+        handle = (AD9826_SPI_Handle){ADC1_ADCCLK_PIN, ADC1_SPI_SCLK_PIN, ADC1_SPI_DATA_PIN, ADC1_SPI_LOAD_PIN};
+        ad9826_spi_init_handle(&handle);
+        reg_value = ad9826_read_data_handle(&handle, AD9826_REG_OFFSET_B) & AD9826_REG_DATA_MASK;
+        ad9826_spi_deinit_handle(&handle);
+    }
+    else if (key_hash == adc2_gain_hash)
+    {
+        handle = (AD9826_SPI_Handle){ADC2_ADCCLK_PIN, ADC2_SPI_SCLK_PIN, ADC2_SPI_DATA_PIN, ADC2_SPI_LOAD_PIN};
+        ad9826_spi_init_handle(&handle);
+        reg_value = ad9826_read_data_handle(&handle, AD9826_REG_GAIN_G) & AD9826_REG_DATA_MASK;
+        ad9826_spi_deinit_handle(&handle);
+    }
+    else if (key_hash == adc2_offset_hash)
+    {
+        handle = (AD9826_SPI_Handle){ADC2_ADCCLK_PIN, ADC2_SPI_SCLK_PIN, ADC2_SPI_DATA_PIN, ADC2_SPI_LOAD_PIN};
+        ad9826_spi_init_handle(&handle);
+        reg_value = ad9826_read_data_handle(&handle, AD9826_REG_OFFSET_G) & AD9826_REG_DATA_MASK;
+        ad9826_spi_deinit_handle(&handle);
+    }
+    else
+    {
+        return false;
+    }
+
+    *type = 2u;
+    *len = 2u;
+    encode_u16_le_local(value, reg_value);
+    return true;
 }
 
 static void timing_gen_configure_sms(void)
@@ -482,7 +547,8 @@ static void process_usb_command(const usb_command_t *cmd)
     {
     case USB_CMD_GET_PARAM_BY_HASH:
         rsp.key_hash = cmd->key_hash;
-        if (!prism_param_get_by_hash(&g_params, cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data))
+        if (!try_read_ad9826_param_by_hash(cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data) &&
+            !prism_param_get_by_hash(&g_params, cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data))
         {
             rsp.status = USB_STATUS_PARAM_NOT_FOUND;
         }
@@ -547,7 +613,10 @@ static void process_usb_command(const usb_command_t *cmd)
             }
         }
 
-        (void)prism_param_get_by_hash(&g_params, cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data);
+        if (!try_read_ad9826_param_by_hash(cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data))
+        {
+            (void)prism_param_get_by_hash(&g_params, cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data);
+        }
         break;
     }
 
