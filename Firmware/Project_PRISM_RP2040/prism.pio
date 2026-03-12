@@ -58,23 +58,22 @@ line_sig_loop:
 cds_line_init:
     set pins 0b1000         [0] side 0b000      ;       Exposure Sync
     out x, 32               [0] side 0b000      ;       Load counter value=3800
-    irq wait 4              [3] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
+    irq wait 4              [2] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
                                                 ; 0     Detects IRQ clear, exit stall state
                                                 ; 1   
-                                                ; 2     
 cds_pixel_loop:                                 ;       GPIO 14-12/18-16
-    set pins 0b0100         [1] side 0b100      ; 3     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
-                                                ; 4
-    set pins 0b0000         [1] side 0b000      ; 5     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
-                                                ; 6
-    set pins 0b0010         [1] side 0b010      ; 7     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
-                                                ; 8
-    set pins 0b0011         [1] side 0b011      ; 9     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
-                                                ; 10
-    set pins 0b0001         [1] side 0b001      ; 11    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
-                                                ; 0
-    jmp x-- cds_pixel_loop  [1] side 0b001      ; 1     S5 - LLH, Check whether to continue pixel loop
-                                                ; 2
+    set pins 0b0100         [1] side 0b100      ; 2     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
+                                                ; 3
+    set pins 0b0000         [1] side 0b000      ; 4     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
+                                                ; 5
+    set pins 0b0010         [1] side 0b010      ; 6     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
+                                                ; 7
+    set pins 0b0011         [1] side 0b011      ; 8     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
+                                                ; 9
+    set pins 0b0001         [1] side 0b001      ; 10    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
+                                                ; 11
+    jmp x-- cds_pixel_loop  [1] side 0b001      ; 0     S5 - LLH, Check whether to continue pixel loop
+                                                ; 1
 .wrap
 
 ; SM2 Clock: 125MHz (Sync FIFO mode)

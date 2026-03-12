@@ -91,23 +91,22 @@ The later pixel loop stage is just some regular IO sets, and another `jmp` comma
 cds_line_init:
     set pins 0b1000         [0] side 0b000      ;       Exposure Sync
     out x, 32               [0] side 0b000      ;       Load counter value=3800
-    irq wait 4              [3] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
+    irq wait 4              [2] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
                                                 ; 0     Detects IRQ clear, exit stall state
-                                                ; 1   
-                                                ; 2     
+                                                ; 1     
 cds_pixel_loop:                                 ;       GPIO 14-12/18-16
-    set pins 0b0100         [1] side 0b100      ; 3     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
-                                                ; 4
-    set pins 0b0000         [1] side 0b000      ; 5     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
-                                                ; 6
-    set pins 0b0010         [1] side 0b010      ; 7     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
-                                                ; 8
-    set pins 0b0011         [1] side 0b011      ; 9     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
-                                                ; 10
-    set pins 0b0001         [1] side 0b001      ; 11    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
-                                                ; 0
-    jmp x-- cds_pixel_loop  [1] side 0b001      ; 1     S5 - LLH, Check whether to continue pixel loop
-                                                ; 2
+    set pins 0b0100         [1] side 0b100      ; 2     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
+                                                ; 3
+    set pins 0b0000         [1] side 0b000      ; 4     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
+                                                ; 5
+    set pins 0b0010         [1] side 0b010      ; 6     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
+                                                ; 7
+    set pins 0b0011         [1] side 0b011      ; 8     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
+                                                ; 9
+    set pins 0b0001         [1] side 0b001      ; 10    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
+                                                ; 11
+    jmp x-- cds_pixel_loop  [1] side 0b001      ; 0     S5 - LLH, Check whether to continue pixel loop
+                                                ; 1
 .wrap
 ```
 
@@ -199,21 +198,21 @@ Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. 
 | -3            |            |               | delay 14/14   |                  |                     | 0   |
 | -2            |            |               | irq clear 4   | (irq wait 4)     | (irq wait 4)        |     |
 | -1            |            |               | (MOS delay)   | Exit Stall State | Exit Stall State    |     |
-| 0             | 0          | 0             | S0            | delay 1/3        | delay 1/3           | 1   |
-| 1             |            | 1             | delay 1       | delay 2/3        | delay 2/3           |     |
-| 2             |            | 2             | S1            | delay 3/3        | delay 3/3           |     |
-| 3             |            | 3             | delay 1       | S0               | out x               | 0   |
-| 4             |            | 4             | S2 (ref. out) | delay 1          | delay 1/2           |     |
-| 5             |            | 5             | delay 1       | S1 (ref. sample) | delay 2/2           |     |
-| 6             |            | 6             | S3            | delay 1          | S0 (ADC bus sample) | 1   |
-| 7             |            | 7             | delay 1/3     | S2               | delay 1/2           |     |
-| 8             |            | 8             | delay 2/3     | delay 1          | delay 1/2           |     |
-| 9             |            | 9             | delay 3/3     | S3               | S1                  | 0   |
-| 10            |            | 10            | S4 (sig. out) | delay 1          | delay 1/2           |     |
-| 11            |            | 11            | delay 1       | S4 (sig. sample) | delay 2/2           |     |
-| 12            | 1          | 0             | S0            | delay 1          | S0 (ADC bus sample) | 1   |
-| 13            |            | 1             | delay 1       | S5               | delay 1/2           |     |
-| 14            |            | 2             | S1            | delay 1          | delay 2/2           |     |
+| 0             | 0          | 0             | S0            | delay 1/2        | delay 1/3           | 1   |
+| 1             |            | 1             | delay 1       | delay 2/2        | delay 2/3           |     |
+| 2             |            | 2             | S1            | S0               | delay 3/3           |     |
+| 3             |            | 3             | delay 1       | delay 1          | out x               | 0   |
+| 4             |            | 4             | S2 (ref. out) | S1 (ref. sample) | delay 1/2           |     |
+| 5             |            | 5             | delay 1       | delay 1          | delay 2/2           |     |
+| 6             |            | 6             | S3            | S2               | S0 (ADC bus sample) | 1   |
+| 7             |            | 7             | delay 1/3     | delay 1          | delay 1/2           |     |
+| 8             |            | 8             | delay 2/3     | S3               | delay 1/2           |     |
+| 9             |            | 9             | delay 3/3     | delay 1          | S1                  | 0   |
+| 10            |            | 10            | S4 (sig. out) | S4 (sig. sample) | delay 1/2           |     |
+| 11            |            | 11            | delay 1       | delay 1          | delay 2/2           |     |
+| 12            | 1          | 0             | S0            | S5               | S0 (ADC bus sample) | 1   |
+| 13            |            | 1             | delay 1       | delay 1          | delay 1/2           |     |
+| 14            |            | 2             | S1            | S0               | delay 2/2           |     |
 
 Here SM0 has a extra `MOS delay`, which is not a actual instruction. It is a ~8ns delay of UCC27524 MOS driver, and we put it here since it could help syncing the SMs.
 
@@ -223,15 +222,15 @@ For the rest of pixel clocks, they are exactly identical to CLK#3-12. After that
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0            | SM1              | SM2                 | SM3 |
 | ------------- | ---------- | ------------- | -------------- | ---------------- | ------------------- | --- |
-| 45600         | 3800       | 10            | S4 (sig. out)  | delay 1          | delay 1/2           | 0   |
-| 45601         |            | 11            | delay 1        | S4 (sig. sample) | delay 2/2           |     |
-| 45602         | X          |               | set pins       | delay 1          | S0 (ADC bus sample) | 1   |
-| 45603         |            |               | delay 1        | S5               | delay 1/2           |     |
-| 45604         |            |               | set pins       | delay 1          | delay 2/2           |     |
-| 45605         |            |               | delay 1        | delay 1          | S1                  | 0   |
-| 45606         |            |               | set pins       | S5               | delay 1/2           |     |
-| 45607         |            |               | delay 1/15     | delay 1          | delay 2/2           |     |
-| 45608         |            |               | delay 2/15     | ...              | ...                 | 1   |
+| 45600         | 3800       | 10            | S4 (sig. out)  | S4 (sig. sample) | delay 1/2           | 0   |
+| 45601         |            | 11            | delay 1        | delay 1          | delay 2/2           |     |
+| 45602         | X          |               | set pins       | S5               | S0 (ADC bus sample) | 1   |
+| 45603         |            |               | delay 1        | delay 1          | delay 1/2           |     |
+| 45604         |            |               | set pins       | ...              | delay 2/2           |     |
+| 45605         |            |               | delay 1        |                  | S1                  | 0   |
+| 45606         |            |               | set pins       |                  | delay 1/2           |     |
+| 45607         |            |               | delay 1/15     |                  | delay 2/2           |     |
+| 45608         |            |               | delay 2/15     |                  | ...                 | 1   |
 | ...           |            |               | ...            |                  |                     | ... |
 | 45631         |            |               | delay 15/15    |                  |                     | 1   |
 | 45632         |            |               | out x          |                  |                     |     |
@@ -259,7 +258,7 @@ Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. Th
 | 45825(-3)     |            |               | delay 14/14      |                  |                  | 0                   |
 | 45826(-2)     |            |               | irq clear 4      | (irq wait 4)     | (irq wait 4)     |                     |
 | 45827(-1)     |            |               | (MOS delay)      | Exit Stall State | Exit Stall State |                     |
-| 45828(0)      | 0          | 0             | S0               | delay 1/3        | delay 1/3        | 1                   |
+| 45828(0)      | 0          | 0             | S0               | delay 1/2        | delay 1/3        | 1                   |
 
 After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45828 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45684 clocks.
 
