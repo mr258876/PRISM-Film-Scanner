@@ -59,17 +59,17 @@ sh_high_loop:                                   ; ┌
                                                 ; └-> >= 200ns in total (t19)
     irq clear 4             [0]     side 0      ; -2 clear IRQ4, for state machine syncing (expected 16ns, -8ns for MOSFET delay)
 line_sig_loop:
-    set pins, 0b01110       [1]     side 0      ; 0  S0 - HHHHL(L), RS high CP low (16ns)
-                                                ; 1
-    set pins, 0b10110       [1]     side 0      ; 2  S1 - HLHHL(L), RS low CP high (16ns)
-                                                ; 3
-    set pins, 0b00110       [1]     side 0      ; 4  S2 - LLHHL(L), RS/CP low, ready for refence sample (16ns)
+    set pins, 0b01110       [0]     side 0      ; 0  S0 - LHHHL(L), RS high CP low (8ns)
+    set pins, 0b11110       [0]     side 0      ; 1  S1 - HHHHL(L), RS high CP high (8ns)
+    set pins, 0b10110       [0]     side 0      ; 2  S2 - LLHHL(L), RS low CP high (8ns)
+    set pins, 0b00110       [2]     side 0      ; 3  S3 - LLHHL(L), RS/CP low, ready for refence sample (8ns)
+                                                ; 4
                                                 ; 5
-    set pins, 0b00001       [3]     side 0      ; 6  S3 - LLLLH(L), CLK2B low, enable signal output (32ns) 
+    set pins, 0b00001       [3]     side 0      ; 6  S4 - LLLLH(L), CLK2B low, enable signal output (32ns) 
                                                 ; 7
                                                 ; 8  
                                                 ; 9
-    jmp x-- line_sig_loop   [1]     side 0      ; 10 S4 - LLLLH(L), jump to sig_out_loop_clock, sample pixel NOW (16ns)
+    jmp x-- line_sig_loop   [1]     side 0      ; 10 S5 - LLLLH(L), jump to sig_out_loop_clock, sample pixel NOW (16ns)
                                                 ; 11
 .wrap
 ```
@@ -199,11 +199,11 @@ Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. 
 | -2            |            |               | irq clear 4   | (irq wait 4)     | (irq wait 4)        |     |
 | -1            |            |               | (MOS delay)   | Exit Stall State | Exit Stall State    |     |
 | 0             | 0          | 0             | S0            | delay 1/2        | delay 1/3           | 1   |
-| 1             |            | 1             | delay 1       | delay 2/2        | delay 2/3           |     |
-| 2             |            | 2             | S1            | S0               | delay 3/3           |     |
-| 3             |            | 3             | delay 1       | delay 1          | out x               | 0   |
-| 4             |            | 4             | S2 (ref. out) | S1 (ref. sample) | delay 1/2           |     |
-| 5             |            | 5             | delay 1       | delay 1          | delay 2/2           |     |
+| 1             |            | 1             | S1            | delay 2/2        | delay 2/3           |     |
+| 2             |            | 2             | S2            | S0               | delay 3/3           |     |
+| 3             |            | 3             | S3 (ref. out) | delay 1          | out x               | 0   |
+| 4             |            | 4             | delay 1/2     | S1 (ref. sample) | delay 1/2           |     |
+| 5             |            | 5             | delay 2/2     | delay 1          | delay 2/2           |     |
 | 6             |            | 6             | S3            | S2               | S0 (ADC bus sample) | 1   |
 | 7             |            | 7             | delay 1/3     | delay 1          | delay 1/2           |     |
 | 8             |            | 8             | delay 2/3     | S3               | delay 1/2           |     |
@@ -211,8 +211,8 @@ Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. 
 | 10            |            | 10            | S4 (sig. out) | S4 (sig. sample) | delay 1/2           |     |
 | 11            |            | 11            | delay 1       | delay 1          | delay 2/2           |     |
 | 12            | 1          | 0             | S0            | S5               | S0 (ADC bus sample) | 1   |
-| 13            |            | 1             | delay 1       | delay 1          | delay 1/2           |     |
-| 14            |            | 2             | S1            | S0               | delay 2/2           |     |
+| 13            |            | 1             | S1            | delay 1          | delay 1/2           |     |
+| 14            |            | 2             | S2            | S0               | delay 2/2           |     |
 
 Here SM0 has a extra `MOS delay`, which is not a actual instruction. It is a ~8ns delay of UCC27524 MOS driver, and we put it here since it could help syncing the SMs.
 
