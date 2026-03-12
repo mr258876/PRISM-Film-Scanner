@@ -37,6 +37,6 @@ Use this as a minimal prototype bring-up checklist.
 
 Known limitations for this stage:
 
-- No complete host-side control application is included yet.
+- The repository currently focuses on electrical bring-up rather than a polished end-user scanning workflow.
 - The mechanical film path and autofocus subsystems are still planned work.
 - The repository documents the electrical prototype better than the final scanner assembly.

@@ -1,6 +1,11 @@
 # Project PRISM Firmwares
 
-This folder contains code to build firmware for RP2040 and CY7C68013A in project. Compiled binaries are also provided if you are looking for them.
+This folder contains firmware for the RP2040 timing generator and the CY7C68013A USB FIFO buffer used in Project PRISM. Prebuilt images for the current prototype are also provided in this folder.
+
+Prebuilt firmware files:
+
+- `Project_PRISM_RP2040.uf2` - RP2040 firmware image
+- `Project_PRISM_CY7C68103A.iic` - CY7C68013A EEPROM image
 
 ## Flashing Firmware for RP2040
 
@@ -11,7 +16,7 @@ This folder contains code to build firmware for RP2040 and CY7C68013A in project
 
 ## Flashing Firmware for CY7C68013A
 
-1. Get `Project_PRISM_CY7C68013A.iic` and `CyUSB Driver And Control Center.zip`.
+1. Get `Project_PRISM_CY7C68103A.iic` and `CyUSB Driver And Control Center.zip`.
 2. Connect the board (CY7C68013A) to your computer, hold `BOOTSEL` button, and press `RESET`.
 3. (If you haven't installed CyUsb driver) A unknown device will pop up in device manager. Right click on it, install driver from the zip file.
 4. Open `CyControl.exe`, you should find a `FX2LP No EEPROM Device`. Click `Program` button on the menu bar, choose `FX2` -> `64K`. Select the iic file.

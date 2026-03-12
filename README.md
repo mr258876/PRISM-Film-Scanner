@@ -21,7 +21,9 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 
 ## Getting Started
 
-At the current stage, the repository is best treated as a prototype bring-up package instead of a finished end-user product. To reproduce the current milestone, you need the hardware in `Hardware/`, the RP2040 timing-generator firmware, the CY7C68013A USB FIFO firmware, and the Windows host utility in `Host Software/`.
+At the current stage, the repository is best treated as a prototype bring-up package instead of a finished end-user product. It documents the current electrical prototype and the firmware/software needed to exercise it, but it is not yet a full scanner replication guide with finalized optics, mechanics, autofocus, or film transport.
+
+To reproduce the current milestone, you need the hardware in `Hardware/`, the RP2040 timing-generator firmware, the CY7C68013A USB FIFO firmware, and the Windows host utility in `Host Software/`.
 
 1. Review the hardware package in `Hardware/` and prepare a board that matches the committed schematic and Gerber files.
 2. Flash or build firmware for both RP2040 and CY7C68013A.
@@ -37,7 +39,9 @@ At the current stage, the repository is best treated as a prototype bring-up pac
 3. Initialize the host software submodule if needed and build the desktop utility in `Host Software/`.
    - If you cloned without submodules, run `git submodule update --init --recursive`.
    - See `Host Software/README.md` for Windows, .NET, and Visual Studio requirements.
-4. Connect the assembled scanner electronics to the host PC over USB and verify that the CY7C68013A FIFO buffer and the RP2040 control interface enumerate.
+4. Connect the assembled scanner electronics to the host PC over USB and verify that both USB functions enumerate.
+   - Project PRISM Control Interface (RP2040): `VID 0x1D50`, `PID 0x619D`
+   - Project PRISM FIFO Buffer (CY7C68013A): `VID 0x1D50`, `PID 0x619C`
 5. Use the host utility or your own tooling against the RP2040 control interface to configure scan parameters and start bring-up.
    - Command and frame definitions are documented in `Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md`.
 
