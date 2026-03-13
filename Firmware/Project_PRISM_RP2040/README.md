@@ -1,8 +1,8 @@
 # Project PRISM RP2040 Firmware
 
-This folder contains all code to build firmware for RP2040 timing generator. 
+This folder contains the code used to build the firmware for the RP2040 timing generator.
 
-Instead of just boring building guide, I decide to make this readme a small record of how this firmware is designed, as well as some experience sharing in RP2040's PIO programming.
+Instead of writing only a basic build guide, this README also records how the firmware is designed and shares some practical experience with RP2040 PIO programming.
 
 ## Replication Guide
 
@@ -12,33 +12,33 @@ Instead of just boring building guide, I decide to make this readme a small reco
 
 ## Introduction
 
-Existing project of high-performance open-sourced CCD cameras usually uses FPGA to generate clock signals for CCD, as well as A/D converters ([CameraNexus/Sitna1](https://github.com/CameraNexus/sitina1), 2025; [BellssGit/ICX453_CCD_Mirrorless_Camera](https://github.com/BellssGit/ICX453_CCD_Mirrorless_Camera), 2025). The benefit is obvious, large amount of avaliable GPIOs, precise control of timing, as well as fast customized calculations such as intensity histograms demostrated in those projects. However, FPGAs also have serval noticeable wasknesses: price, power consumption, as well as difficulty in development.
+Existing open-source high-performance CCD camera projects usually use FPGAs to generate clock signals for the CCD and A/D converters ([CameraNexus/Sitna1](https://github.com/CameraNexus/sitina1), 2025; [BellssGit/ICX453_CCD_Mirrorless_Camera](https://github.com/BellssGit/ICX453_CCD_Mirrorless_Camera), 2025). The benefits are clear: many available GPIOs, precise timing control, and fast custom logic such as the intensity histograms demonstrated in those projects. However, FPGAs also have several noticeable weaknesses: price, power consumption, and development difficulty.
 
-Therefore, most projects, especially linear CCD projects, still sticks to MCUs or USB chips as timing generator ([smr547/cam86](https://github.com/smr547/cam86), 2016; [divertingPan/Line_Scan_Camera](https://github.com/divertingPan/Line_Scan_Camera), 2021; [openlux/openlux-v1](https://github.com/openlux/openlux-v1), 2022; [drmcnelson/TCD1304-Sensor-Device-with-Linear-Response-and-16-Bit-Differential-ADC](https://github.com/drmcnelson/TCD1304-Sensor-Device-with-Linear-Response-and-16-Bit-Differential-ADC), 2025). Although easier to develop, most of theses projects are limited to the MCUs, or limited to how these MCUs can generate clock signals, and could only reach a readout speed of 0.5-3 million pixels per second (MSPS). 
+Therefore, most projects, especially linear CCD projects, still rely on MCUs or USB chips as timing generators ([smr547/cam86](https://github.com/smr547/cam86), 2016; [divertingPan/Line_Scan_Camera](https://github.com/divertingPan/Line_Scan_Camera), 2021; [openlux/openlux-v1](https://github.com/openlux/openlux-v1), 2022; [drmcnelson/TCD1304-Sensor-Device-with-Linear-Response-and-16-Bit-Differential-ADC](https://github.com/drmcnelson/TCD1304-Sensor-Device-with-Linear-Response-and-16-Bit-Differential-ADC), 2025). Although easier to develop, most of these projects are limited by the MCU itself, or by how the MCU can generate the required clock signals, and only reach readout speeds of about 0.5-3 million pixels per second (MSPS).
 
-Release of RP2040 changed the game. RP2040, as well as later RP2350, are shipped with an unique peripheral called Programmable I/O (PIO), which allows you to control IO pins by exact system clock. Thanks to this feature, the chip was quickly adopted in a wide range of applications, espacially in modding a multi-play-mode gaming device. In this project, by utilizing this feature, we are able to push our system pixel rate dramaticly up to 20MSPS without a FPGA.
+The release of the RP2040 changed the game. The RP2040, and later the RP2350, include a unique peripheral called Programmable I/O (PIO), which allows IO pins to be controlled with exact system-clock timing. Thanks to this feature, the chip was quickly adopted in a wide range of applications, especially in game-console modding. In this project, by using PIO, we are able to push the system pixel rate up to 20 MSPS without an FPGA.
 
 ## Methodology
 
 ### Overview of PIO in RP2040
-Each RP2040 is equipped with 2 PIO peripherals, with 4 State Machines (SM)s in each PIO. For each PIO, it has its own 32-slot instruction memory, 4-SMs shared. And each SM has its own TX/RX FIFO buffer sized 4x32bit each, and could be merged into a 8x32bit TX/RX buffer if only using TX or RX.
+Each RP2040 has 2 PIO peripherals, and each PIO contains 4 State Machines (SMs). Each PIO has its own 32-slot instruction memory shared by its 4 SMs. Each SM also has its own 4x32-bit TX/RX FIFO, which can be merged into an 8x32-bit FIFO when only TX or RX is needed.
 
 ![RP2040_PIO_Overview](../../Resources/RP2040_PIO_Overview.png)
 
-When SMs are configured running, each SM execute 1 instruction in parallel in 1 clock cycle (unless stalled). Clock speed of SMs could be adjusted seperately, using a clock divider. When configured, a SM may control up to 10 IOs, with 5 regular pins, which need a SET instruction and consume clock cycle, and 5 side-set pins, which could be changed along with other instructions' clock cycle.
+When enabled, each SM executes 1 instruction per clock cycle in parallel with the others, unless it is stalled. The clock speed of each SM can be adjusted independently using a clock divider. An SM may control up to 10 IOs: 5 regular pins, which require `SET` instructions and consume instruction cycles, and 5 side-set pins, which can be changed alongside another instruction in the same cycle.
 
 ### State Machines in Project PRISM
 
-In our project, we need to generate clock signals for TCD1708 CCD, 2xAD9826 ADCs, and CY7C68013A working as ADC FIFO buffer. To achieve the generation, we configured all 4 SMs of PIO0. Details of these 4 SMs are described in table below:
+In this project, we need to generate clock signals for the TCD1708 CCD, 2 AD9826 ADCs, and the CY7C68013A acting as the ADC FIFO buffer. To do that, we use all 4 SMs in `PIO0`. The details are shown in the table below:
 
 | SM# | Pin Assignments | Function Description                                                                                     | Instruction Length |
 | --- | --------------- | -------------------------------------------------------------------------------------------------------- | ------------------ |
-| 0   | 0-5             | Generates CCD clocks (SH, φ1, φ2, φ2B, RS, CP), sync to CY7C68013A's IFCLK                               | 13                 |
-| 1   | 12-18           | Generates ADC1/2 clocks (ADCCLK, CDSCLK2, CDSCLK1), as well as a exposure sync signal, sync to CCD clock | 9                  |
-| 2   | 19, 21          | Generates SLWR/PKTEND signal for CY7C68013A, sync to CCD clock                                           | 7                  |
+| 0   | 0-5             | Generates CCD clocks (SH, φ1, φ2, φ2B, RS, CP), sync to CY7C68013A's IFCLK                               | 15                 |
+| 1   | 12-18           | Generates ADC1/2 clocks (ADCCLK, CDSCLK2, CDSCLK1), as well as an exposure sync signal, sync to CCD clock | 8                  |
+| 2   | 19-22           | Generates SLWR/PKTEND signal for CY7C68013A, keeps SLCS low, sync to CCD clock                           | 7                  |
 | 3   | 20              | Generates an always-on IFCLK clock for CY7C68013A                                                        | 2                  |
 
-Instead of 1 SM per chip, we use SM1 to generate clocks for both ADCs, since their timings are identical, and we may also save a SM to generate IFCLK for USB FIFO buffer, which is a CY7C68013A in synchronous mode. 
+Instead of assigning 1 SM per chip, we use SM1 to generate clocks for both ADCs because their timing is identical. This also saves 1 SM for generating `IFCLK` for the CY7C68013A USB FIFO buffer in synchronous mode.
 
 #### SM0
 ```asm
@@ -77,13 +77,13 @@ line_sig_loop:
 .wrap
 ```
 
-Program of SM0 could be segmented into 2 parts: line preparation stage and pixel loop stage. In the line preparation stage, we just basically followed timing chart of TCD1708D, but serval small workarounds:
+The SM0 program can be divided into 2 parts: the line-preparation stage and the pixel-loop stage. In the line-preparation stage, we mostly follow the TCD1708D timing chart, with several small workarounds:
 
-- The high period of `SH` pin is controlled by low 16 bits data in each word of SM0's fifo, called `Exposure ticks` in our code. We read the value to register `x` each line, so we may control the exposure time with this, in a unit of 12 clock cycles. Program will then loop with the `jmp` command to the same line until enough delay. `Exposure ticks` now allows `0`, which makes the `SH` high time (0+1)\*12\*8=96ns.
-- Then we read 4 bits into register `x` for a 144-clocks `SH` period, where `x` is fixed to 11.
-- We finally read high 12 bits data in each word of SM0's fifo into register `x`, which controls the number of loops in later pixel clock stage. The number is fixed as 3800, see TCD1708D datasheet.
+- The low 16 bits in each SM0 FIFO word, called `Exposure ticks` in our code, control the pre-`SH` integration delay before the sensor enters the fixed `SH` pulse. We read the value into register `x` each line, so exposure time is adjustable in units of 12 SM clocks. The program then loops with the `jmp` command until enough delay has passed. `Exposure ticks` now allows `0`, which gives the minimum integration delay.
+- Then we read 4 bits into register `x` for a fixed 144-clocks `SH` period, where `x` is fixed to 11.
+- Finally, we read the upper 12 bits of each SM0 FIFO word into register `x`, which controls the number of loops in the later pixel-clock stage. This value is fixed at 3800; see the TCD1708D datasheet.
 
-The later pixel loop stage is just some regular IO sets, and another `jmp` command determine whether to continue pixel clocks or go back to line preparation. For each pixel loop, state 0, 1, 2, and 4 has a 1 clock delay after 1 clock for each execution, and state 3 has 3, which takes us 12 SM clocks each pixel in sum.
+The later pixel-loop stage is a sequence of regular IO updates, plus another `jmp` command that determines whether to continue pixel clocks or return to line preparation. For each pixel loop, states 0, 1, 2, and 4 each have a 1-clock delay after 1 instruction clock, while state 3 has a 3-clock delay, for a total of 12 SM clocks per pixel.
 
 ![TCD1708D Timing Sequence](../../Resources/TCD1708D_Timing_Sequence.png)
 
@@ -114,7 +114,7 @@ cds_pixel_loop:                                 ;       GPIO 15-12/18-16
 .wrap
 ```
 
-SM1 controls colck signal of both ADC, which have been configured in 1-channel CDS mode after power up. Similar to SM0, the program here is just basically an implementation of timing chart below. We also read a value from fifo each row into `x`, so we can control the number of pixel loops. The value is fixed same as SM0's 3800.
+SM1 controls the clock signals for both ADCs, which are configured in 1-channel CDS mode after power-up. Similar to SM0, this program is mostly a direct implementation of the timing chart below. We also read one value from the FIFO into `x` for each row so we can control the number of pixel loops. The value is fixed at the same 3800 used by SM0.
 
 ![AD9826 Timing Sequence](../../Resources/AD9826_Timing_Sequence.png)
 
@@ -145,9 +145,9 @@ fifo_line_sync_end:
 .wrap
 ```
 
-Program of SM2 reads 2x16 bits data into register `y` and `x` seperately in each row. Register `x` works as pixel loop counter like SM0 and SM1, but its value is 7601(3801*2-1) instead of 3800, since our ADCs are sampling CCD outputs into 16-bit values. Register `y` is an indicator of manual packet send. The USB buffer had been configured to send a package each time it got 512 bytes, however, our ADCs gives 15206 bytes (7603 words, 7602 row words + extra 2 bytes when exiting pixel loop, we don't have enough time to pull `SLWR` high), which could not be divided by 512. Thus, we need this indicator to send the extra bytes everytime we want to end a transaction.
+The SM2 program reads two 16-bit values into registers `y` and `x` separately for each row. Register `x` works as the pixel-loop counter, like in SM0 and SM1, but its value is 7601 (`3801*2-1`) instead of 3800 because the ADCs sample the CCD outputs into 16-bit values. Register `y` is used as an indicator for manual packet send. The USB buffer is configured to send a packet every 512 bytes, but our ADCs produce 15206 bytes per row (7603 words: 7602 row words plus an extra 2 bytes when exiting the pixel loop, because we do not have enough time to pull `SLWR` high), which is not divisible by 512. Therefore, we use this indicator to send the extra bytes whenever we want to end a transaction.
 
-You may have also noticed, SM2 is assigned pin 19 & 21 for `SLWR` and `PKTEND` signal, but we are using a 3-bit value in side-set, in which bit-0 is `SLWR` and bit-2 is `PKTEND`. This is due to PIO SMs could only be assigned with continous pin ranges, and we have to put pin 20 here and ignore it. In fact, this is a mistake, pin 19 and pin 20, `SLWR` and `IFCLK` shuold have changed their position in circuit design, but later we found the board is still running, and we do need another SM for a freely running `IFCLK`, so it's kept here.
+You may have also noticed that SM2 logically drives `SLWR` and `PKTEND`, but it is configured over the continuous pin range GPIO19-22. In the side-set field, bit 0 is `SLWR`, bit 1 is GPIO20, and bit 2 is `PKTEND`; meanwhile, GPIO22 is included in the SM pin range and kept low as the unused `SLCS`. This is because PIO SMs only support continuous pin ranges, so pin 20 has to be included even though `IFCLK` is actually driven by SM3. In fact, this is a hardware-routing mistake: pin 19 and pin 20, `SLWR` and `IFCLK`, should have swapped positions in the circuit design. Later, we found that the board still worked, and we also needed another SM for a freely running `IFCLK`, so the design was kept as-is.
 
 ![CY7C68013A Timing Sequence](../../Resources/CY7C68013A_Timing_Sequence.png)
 
@@ -161,18 +161,18 @@ You may have also noticed, SM2 is assigned pin 19 & 21 for `SLWR` and `PKTEND` s
 .wrap
 ```
 
-SM3 is loaded with a simple program chich toggles pin20 to generate `IFCLK`.
+SM3 is loaded with a simple program that toggles pin 20 to generate `IFCLK`.
 
 
 ### In Syncing the State Machines
 
-You may have noticed, there are `irq clear` or `irq wait` instructions in all SMs, and it is these instructions that keep all the SMs in sync. This is so far the hardest part in imaging subsystem development, and it took weeks to get it working.
+You may have noticed that there are `irq clear` and `irq wait` instructions in all SMs. These instructions are what keep the state machines in sync. This has been the hardest part of the imaging-subsystem development so far, and it took weeks to get working reliably.
 
-First, a short explain of these two instructions:
-- `irq clear`: Clear an irq flag. Same as other instructions, takes 1 SM clock to clear.
-- `irq wait`: Set an irq flag, and wait until the flag is cleared. After the execution of this instruction, the waiting SM will check whether given irq flag is cleared or not. If cleared, the SM continue to next instruction in next SM clock after the detection of irq clear.
+First, a short explanation of these two instructions:
+- `irq clear`: Clears an IRQ flag. Like other instructions, it takes 1 SM clock to execute.
+- `irq wait`: Sets an IRQ flag and waits until the flag is cleared. After executing this instruction, the waiting SM checks whether the given IRQ flag has been cleared. If it has, the SM continues to the next instruction on the next SM clock after detecting the clear.
 
-The following table shows how these two instructions works (assume they work in same frequency):
+The following table shows how these two instructions work, assuming the SMs run at the same frequency:
 
 | SM Clock | SM0                      | SM1             |
 | -------- | ------------------------ | --------------- |
@@ -183,9 +183,9 @@ The following table shows how these two instructions works (assume they work in 
 | 4        | continue to instruction… |                 |
 | 5        |                          |                 |
 
-In the example above, SM0 sets irq flag 4 and enters waiting since clock #0, and then SM1 clears irq flag 4 in clock #2. SM0 detects the flag was cleared until clock #3, and the execution of instructions is not resumed until clock #4.
+In the example above, SM0 sets IRQ flag 4 and enters the wait state at clock 0, and SM1 clears IRQ flag 4 at clock 2. SM0 does not detect that the flag was cleared until clock 3, and instruction execution does not resume until clock 4.
 
-We start with SM0 first, since it is the base of our clocks. In every line preparation period, SM0 enters waiting through `irq wait 5`, and wait to be cleared by SM3. Once SM3 cleared the flag, SM0 continues to delay 14 clocks of `irq wait 5` in 2 clocks.
+We start with SM0, since it is the base of our timing. In every line-preparation period, SM0 enters the wait state through `irq wait 5` and waits for SM3 to clear it. Once SM3 clears the flag, SM0 continues and then spends 14 clocks in the delayed portion of the `irq wait 5` instruction.
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0              | SM1 | SM2 | SM3                 |
 | ------------- | ---------- | ------------- | ---------------- | --- | --- | ------------------- |
@@ -195,7 +195,7 @@ We start with SM0 first, since it is the base of our clocks. In every line prepa
 | -15           |            |               | delay 2/14       |     |     | 0                   |
 | -14           |            |               | delay 3/14       |     |     | 0                   |
 
-Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. SM1 and SM2 then start to delay the clocks set in `irq wait 4` instruction.
+Then, after the 14-clock delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. SM1 and SM2 then begin the delay specified by their `irq wait 4` instructions.
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0           | SM1              | SM2                 | SM3 |
 | ------------- | ---------- | ------------- | ------------- | ---------------- | ------------------- | --- |
@@ -218,11 +218,11 @@ Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. 
 | 13            |            | 1             | S1            | delay 1          | delay 1/2           |     |
 | 14            |            | 2             | S2            | S0               | delay 2/2           |     |
 
-Here SM0 has a extra `MOS delay`, which is not a actual instruction. It is a ~8ns delay of UCC27524 MOS driver, and we put it here since it could help syncing the SMs.
+Here SM0 has an extra `MOS delay`, which is not an actual instruction. It is the approximately 8 ns delay of the UCC27524 MOS driver, and we include it here because it helps the SMs line up in the real hardware.
 
-And then our SMs are synced, our CCD clocks are generated. ADC clocks are 1 clock delayed than CCD clocks, in order to get stable voltages. Bus sample of USB buffer happens 3 clocks after ADCCLK changes, making sure we are not getting wrong data.
+At that point, the SMs are synchronized and the CCD clocks are generated. The ADC clocks are delayed by 1 clock relative to the CCD clocks in order to sample more stable voltages. The USB FIFO bus sample happens 4 clocks after `ADCCLK` changes, helping ensure that invalid data is not captured.
 
-For the rest of pixel clocks, they are exactly identical to CLK#3-12. After that, the clocks enters preparation period again. Since the preparation of SM0 is way longer than SM1 and SM2, we are ignoreing their states after the pixel clock ends until they're wake up again. 
+For the remaining pixel clocks, the sequence is identical to CLK#3-12. After that, the clocks enter the preparation period again. Since the preparation phase of SM0 is much longer than that of SM1 and SM2, we ignore the later states of SM1 and SM2 after the pixel clock ends until they are woken up again.
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0            | SM1              | SM2                 | SM3 |
 | ------------- | ---------- | ------------- | -------------- | ---------------- | ------------------- | --- |
@@ -243,13 +243,13 @@ For the rest of pixel clocks, they are exactly identical to CLK#3-12. After that
 | 45641         |            |               | Exposure ticks |                  |                     | 0   |
 | ...           |            |               | ...            |                  |                     | ... |
 | 45647         |            |               | out x          |                  |                     | 0   |
-| 45648         |            |               | delay 12*(x+1) |                  |                     | 1   |
+| 45648         |            |               | delay 6*(x+1)  |                  |                     | 1   |
 
-Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. The reason why the delay here is degisned as 12*(x+1) is, 12 clock cycles could make SM3 run 2 entire cycles. We have aligned SM0's execution and SM3's using the tons of delay avaliable in line preparation, and it will make aligning following instructions much more easier.
+Here we assume `Exposure ticks` is 0, which gives the minimum pre-`SH` integration delay of `6*(x+1)` clocks. The reason this delay is designed as `6*(x+1)` is that 6 clock cycles make SM3 run one full cycle. We use the available delay in line preparation to align SM0 with SM3, which makes the following instructions much easier to align. After the `Exposure ticks` delay, the `SH` high pulse itself still remains fixed at 1152 ns.
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0              | SM1              | SM2              | SM3                 |
 | ------------- | ---------- | ------------- | ---------------- | ---------------- | ---------------- | ------------------- |
-| 45648         |            |               | delay 12*(x+1)   |                  |                  | 1                   |
+| 45648         |            |               | delay 6*(x+1)    |                  |                  | 1                   |
 | ...           |            |               | ...              |                  |                  | ...                 |
 | 45791         |            |               | delay 12/12      |                  |                  | 0                   |
 | 45792         |            |               | out x            |                  |                  | 1                   |
@@ -265,50 +265,50 @@ Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. Th
 | 45825(-3)     |            |               | delay 14/14      |                  |                  | 0                   |
 | 45826(-2)     |            |               | irq clear 4      | (irq wait 4)     | (irq wait 4)     |                     |
 | 45827(-1)     |            |               | (MOS delay)      | Exit Stall State | Exit Stall State |                     |
-| 45827(0)      | 0          | 0             | S0               | delay 1/2        | delay 1/3        | 1                   |
+| 45828(0)      | 0          | 0             | S0               | delay 1/2        | delay 1/3        | 1                   |
 
-After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45827 clock cycles to run, as `Exposure ticks`=0.
+After the `SH` delay, we continue into the 15-clock delay on the `jmp` command. After that, we reach `irq wait 5`, set IRQ 5, and wait for SM3 to clear it. The timing of this instruction lands only a few clocks before the next `irq clear 5` from SM3, so SM0 does not wait very long. Once SM0 wakes up, all SMs return to exactly the same state discussed earlier. We can therefore conclude that each scan line takes 45828 clock cycles when `Exposure ticks = 0`.
 
 For a full timing sequence, please check [State Machine Sequence.xlsx](<State Machine Sequence.xlsx>).
 
 ### Exposure Time Control
 
-Following the timing table above, in current settings, we need 45827 clocks each scan row (when expsorure ticks = 0).
+Following the timing tables above, the current settings require 45828 clocks for each scan row when `Exposure ticks = 0`.
 
 These timing numbers assume the default `125MHz` RP2040 system clock. If you store a different `prism.sys_clock_khz` value through the control interface, the firmware reapplies that frequency on boot and the real-time exposure/readout durations scale with the new clock.
 
-And here is a quick lookup table if you want to change line exposure time.
+Here is a quick lookup table if you want to change the line exposure time.
 
 | exposure ticks | scan row cycles | time per frame (ms) | shutter speed |
 | -------------- | --------------- | ------------------- | ------------- |
-| 0              | 45827           | 0.366664            | 1/2727.6496   |
-| 695            | 49997           | 0.399976            | 1/2500.1500   |
-| 2779           | 62501           | 0.500008            | 1/1999.9860   |
-| 5383           | 78125           | 0.625               | 1/1600        |
-| 9029           | 100001          | 0.800008            | 1/1249.9875   |
-| 13195          | 124997          | 0.999976            | 1/1000.0240   |
-| 18404          | 156251          | 1.250008            | 1/799.9949    |
-| 27084          | 208331          | 1.666648            | 1/600.0067    |
-| 34029          | 250001          | 2.000008            | 1/499.998     |
-| 57466          | 390623          | 3.124984            | 1/320.0016    |
-| 65535          | 439037          | 3.512296            | 1/284.7410    |
+| 0              | 45828           | 0.366624            | 1/2727.5901   |
+| 695            | 49998           | 0.399976            | 1/2500.1500   |
+| 2779           | 62502           | 0.500008            | 1/1999.9860   |
+| 5383           | 78126           | 0.625               | 1/1600        |
+| 9029           | 100002          | 0.800008            | 1/1249.9875   |
+| 13195          | 124998          | 0.999976            | 1/1000.0240   |
+| 18404          | 156252          | 1.250008            | 1/799.9949    |
+| 27084          | 208332          | 1.666648            | 1/600.0067    |
+| 34029          | 250002          | 2.000008            | 1/499.998     |
+| 57466          | 390624          | 3.124984            | 1/320.0016    |
+| 65535          | 439038          | 3.512296            | 1/284.7410    |
 
 
 ### System Clock
 
-The RP2040 could be easily overclocked, and no extra modifications required as clock speed <= 270Mhz. However, pushing the clock speed too hard will damage our timing design, and ADC may not able to sample correct voltage. This section is just for a record, it is not recommended to overclock in actual use. As frequency increases, you may need to adjust both offset and gain of ADCs to a lower value to keep everything running. 
+The RP2040 can be overclocked fairly easily, and no extra hardware changes are required as long as the clock speed stays at or below 270 MHz. However, pushing the clock too far will break the timing design, and the ADCs may no longer sample the correct voltages. This section is included mainly as a record; overclocking is not recommended for normal use. As the frequency increases, you may need to reduce both ADC offset and gain to keep the system running correctly.
 
-Beside overclocking, underclocking is now also supported. You may reduce the system clock to get loger exposure time.
+Besides overclocking, underclocking is now also supported. You may reduce the system clock to get longer exposure times.
 
 | clock frequency | exposure ticks | row clock cycles | time per frame (ms) | shutter speed | data rate   |
 | --------------- | -------------- | ---------------- | ------------------- | ------------- | ----------- |
-| 125Mhz          | 0              | 45827            | 0.366664            | 1/2727.6496   | ~39.52MiB/s |
-| 130MHz          | 0              | 45827            | 0.352515            | 1/2836.7556   | ~41.13MiB/s |
-| 133MHz          | 0              | 45827            | 0.344564            | 1/2902.2192   | ~42.04MiB/s |
+| 125Mhz          | 0              | 45828            | 0.366624            | 1/2727.5901   | ~39.52MiB/s |
+| 130MHz          | 0              | 45828            | 0.352523            | 1/2836.6937   | ~41.13MiB/s |
+| 133MHz          | 0              | 45828            | 0.344571            | 1/2902.1559   | ~42.04MiB/s |
 
 ## Conclusion
 
-This project shows that RP2040 can be used as a practical high-speed timing generator for CCD imaging, without relying on an FPGA. By coordinating four PIO state machines, Project PRISM is able to generate CCD, ADC, and USB FIFO timing in a fully synchronized way, reaching up to 20.5 MSPS in the current design.
+This project shows that RP2040 can be used as a practical high-speed timing generator for CCD imaging, without relying on an FPGA. By coordinating four PIO state machines, Project PRISM is able to generate CCD, ADC, and USB FIFO timing in a fully synchronized way, reaching up to 20 MSPS in the current design.
 
 The most important takeaway is not only the final speed, but also the method: careful instruction-level timing design, explicit state machine synchronization with IRQs, and leaving enough timing margin for external devices such as MOS drivers, ADCs, and USB FIFO logic. In other words, PIO is powerful enough for this class of problem, but only when the whole signal chain is considered together instead of treating PIO code in isolation.
 
