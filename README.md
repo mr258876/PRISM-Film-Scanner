@@ -2,7 +2,7 @@
 
 *Precise RGB Image Scanning Module*
 
-This project aims to develop an open-sourced high-resolution film scanner. The subsystems may also be used for other proposes.
+This project aims to develop an open-source high-resolution film scanner. The subsystems may also be used for other purposes.
 
 > [!WARNING]
 > Project under active development. Use at your own risk.
@@ -17,7 +17,7 @@ This project aims to develop an open-sourced high-resolution film scanner. The s
 - In progress - Synchronized RGB light source
 - Planned - Auto focus system
 - Planned - Film holder & feeding system
-- Planned - Sensor curcit optimization
+- Planned - Sensor circuit optimization
 
 ## Getting Started
 

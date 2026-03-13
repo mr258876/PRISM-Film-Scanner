@@ -21,27 +21,30 @@ line_sig_init:                                  ; 54321(0) <- GPIO 5-0
     set pins, 0b01001       [1]     side 0      ; HHLLH(L), RS high CP low (16ns)
     set pins, 0b10001       [1]     side 0      ; HLLLH(L), RS low CP high (16ns)
     set pins, 0b00001       [15]    side 0      ; ┌ LLLLH(L), RW/CP low (128ns)
-    out x, 16               [15]    side 0      ; | LLLLH(L), SH high (8ns + 120ns)   Load & controls exposure time, as well as enable of exposure
+    out x, 16               [8]     side 0      ; | LLLLH(L), SH low (72ns)   Load & controls exposure time, as well as enable of exposure
+exp_ticks_loop:                                 ; |
+    jmp x-- exp_ticks_loop  [5]     side 0      ; | LLLLH(L), SH low (48ns)*(x+1)
                                                 ; └-> >= 200ns in total (t18)
+    out x, 4                [0]     side 0      ;   LLLLH(L), x=11
 sh_high_loop:                                   ; ┌
-    jmp x-- sh_high_loop    [11]    side 1      ; | LLLLH(H), SH high (96ns)*(x+1)
-                                                ; └-> >= 1000ns in total (t3)
-    out x, 16               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3800 (128ns)
+    jmp x-- sh_high_loop    [11]    side 1      ; | LLLLH(H), SH high (96ns*12=1152ns)
+                                                ; └-> 1000ns <= && <= 5000ns in total (t3)
+    out x, 12               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3800 (128ns)
     irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # only need 1 cycle delay, another 1 hidden before wareup. See readme
                                                 ; └-> >= 200ns in total (t19)
     irq clear 4             [0]     side 0      ; -2 clear IRQ4, for state machine syncing (expected 16ns, -8ns for MOSFET delay)
 line_sig_loop:
-    set pins, 0b01110       [0]     side 0      ; 0  S0 - LHHHL(L), RS high CP low (8ns)
-    set pins, 0b11110       [0]     side 0      ; 1  S1 - HHHHL(L), RS high CP high (8ns)
-    set pins, 0b10110       [0]     side 0      ; 2  S2 - LLHHL(L), RS low CP high (8ns)
-    set pins, 0b00110       [2]     side 0      ; 3  S3 - LLHHL(L), RS/CP low, ready for refence sample (8ns)
+    set pins, 0b11110       [1]     side 0      ; 0  S0 - LHHHL(L), RS high CP high (16ns)
+                                                ; 1
+    set pins, 0b10110       [0]     side 0      ; 2  S1 - LLHHL(L), RS low CP high (8ns)
+    set pins, 0b00110       [2]     side 0      ; 3  S2 - LLHHL(L), RS/CP low, ready for refence sample (8ns)
                                                 ; 4
                                                 ; 5
-    set pins, 0b00001       [3]     side 0      ; 6  S4 - LLLLH(L), CLK2B low, enable signal output (32ns) 
+    set pins, 0b00001       [3]     side 0      ; 6  S3 - LLLLH(L), CLK2B low, enable signal output, sample pixel after 20ns (32ns) 
                                                 ; 7
-                                                ; 8  
+                                                ; 8
                                                 ; 9
-    jmp x-- line_sig_loop   [1]     side 0      ; 10 S5 - LLLLH(L), jump to sig_out_loop_clock, sample pixel NOW (16ns)
+    jmp x-- line_sig_loop   [1]     side 0      ; 10 S4 - LLLLH(L), jump to sig_out_loop_clock (16ns)
                                                 ; 11
 .wrap
 
@@ -58,23 +61,22 @@ line_sig_loop:
 cds_line_init:
     set pins 0b1000         [0] side 0b000      ;       Exposure Sync
     out x, 32               [0] side 0b000      ;       Load counter value=3800
-    irq wait 4              [3] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
+    irq wait 4              [2] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
                                                 ; 0     Detects IRQ clear, exit stall state
                                                 ; 1   
-                                                ; 2
-cds_pixel_loop:                                 ;       GPIO 14-12/18-16
-    set pins 0b0100         [1] side 0b100      ; 3     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
+cds_pixel_loop:                                 ;       GPIO 15-12/18-16
+    set pins 0b0100         [2] side 0b100      ; 2     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
+                                                ; 3
                                                 ; 4
-    set pins 0b0000         [1] side 0b000      ; 5     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
+    set pins 0b0010         [2] side 0b010      ; 5     S1 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low, sampleing reference in 2ns
                                                 ; 6
-    set pins 0b0010         [1] side 0b010      ; 7     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
-                                                ; 8
-    set pins 0b0011         [1] side 0b011      ; 9     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
-                                                ; 10
-    set pins 0b0001         [1] side 0b001      ; 11    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
-                                                ; 0
-    jmp x-- cds_pixel_loop  [1] side 0b001      ; 1     S5 - LLH, Check whether to continue pixel loop
-                                                ; 2
+                                                ; 7
+    set pins 0b0011         [1] side 0b011      ; 8     S2 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
+                                                ; 9
+    set pins 0b0001         [1] side 0b001      ; 10    S3 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
+                                                ; 11
+    jmp x-- cds_pixel_loop  [1] side 0b001      ; 0     S4 - LLH, Check whether to continue pixel loop
+                                                ; 1
 .wrap
 
 ; SM2 Clock: 125MHz (Sync FIFO mode)

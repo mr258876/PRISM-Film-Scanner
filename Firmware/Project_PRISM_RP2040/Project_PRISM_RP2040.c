@@ -23,14 +23,18 @@
 #include "prism_defaults.h"
 #include "usb_task.h"
 
+#define PRISM_SH_TICKS_PER_LINE 11UL
 #define PRISM_PIXEL_CYCLES_PER_LINE 3800UL
 #define PRISM_CDS_CYCLES_PER_LINE 3800UL
 #define PRISM_FIFO_CYCLES_PER_LINE 7601UL
 #define PRISM_BYTES_PER_LINE (15204UL + 2UL)  // Extra 2 bytes when judging manual flush
-#define PRISM_MIN_SYS_CLOCK_KHZ 125000u
+#define PRISM_MIN_SYS_CLOCK_KHZ 30000u
 #define PRISM_MAX_SYS_CLOCK_KHZ 200000u
+#define PRISM_PARAMS_SAVE_DEBOUNCE_MS 1000u
 
 static prism_params_t g_params;
+static bool g_params_dirty = false;
+static uint64_t g_params_save_deadline_us = 0;
 static uint32_t g_scan_lines = 1;
 static volatile bool g_scan_active = false;
 static volatile bool g_scan_done_pending = false;
@@ -49,10 +53,7 @@ static volatile uint8_t g_scan_dma_running_bank = 0;
 static volatile uint8_t g_scan_dma_pending_bank = 1;
 static volatile uint32_t g_scan_prepared_lines = 0;
 static volatile uint32_t g_scan_bank_lines[SCAN_DMA_BANKS] = {0, 0};
-static volatile bool g_scan_use_sm0 = true;
 static volatile bool g_warmup_active = false;
-static int g_warmup_dma_chan = -1;
-static uint32_t g_warmup_dma_irq_mask = 0;
 static uint32_t g_warmup_dma_buf[WARMUP_DMA_CHUNK_LINES];
 static uint g_line_sig_offset = 0;
 static uint g_cds_line_offset = 0;
@@ -65,13 +66,39 @@ static uint32_t g_scan_dma_buf_sm2[SCAN_DMA_BANKS][SCAN_DMA_CHUNK_LINES];
 static void timing_gen_reinit(void);
 static void warmup_dma_fill_buffer(void);
 
-static void normalize_params(prism_params_t *params)
+static void schedule_params_save(void)
 {
-    if (params->exposure_ticks == 0)
-    {
-        params->exposure_ticks = PRISM_DEFAULT_EXPOSURE_TICKS;  // minimum exposure
+    g_params_dirty = true;
+    g_params_save_deadline_us = time_us_64() + ((uint64_t)PRISM_PARAMS_SAVE_DEBOUNCE_MS * 1000u);
+}
+
+static void flush_pending_params_save(void)
+{
+    if (!g_params_dirty || g_scan_active || g_warmup_active) {
+        return;
     }
 
+    uint64_t now = time_us_64();
+    if ((int64_t)(now - g_params_save_deadline_us) < 0) {
+        return;
+    }
+
+    if (prism_params_save(&g_params)) {
+        g_params_dirty = false;
+        g_params_save_deadline_us = 0;
+        return;
+    }
+
+    g_params_save_deadline_us = now + ((uint64_t)PRISM_PARAMS_SAVE_DEBOUNCE_MS * 1000u);
+}
+
+static inline uint32_t sm0_dma_irq_mask(void)
+{
+    return (1u << g_scan_dma_chan[0]);
+}
+
+static void normalize_params(prism_params_t *params)
+{
     if (params->sys_clock_khz < PRISM_MIN_SYS_CLOCK_KHZ ||
         params->sys_clock_khz > PRISM_MAX_SYS_CLOCK_KHZ)
     {
@@ -81,6 +108,12 @@ static void normalize_params(prism_params_t *params)
 
 static bool system_clock_supported_khz(uint32_t sys_clock_khz)
 {
+    if (sys_clock_khz < PRISM_MIN_SYS_CLOCK_KHZ ||
+        sys_clock_khz > PRISM_MAX_SYS_CLOCK_KHZ)
+    {
+        return false;
+    }
+
     uint vco = 0;
     uint post_div1 = 0;
     uint post_div2 = 0;
@@ -241,7 +274,7 @@ static void timing_gen_reinit(void)
 
 static void warmup_dma_fill_buffer(void)
 {
-    uint32_t word = g_params.exposure_ticks | (PRISM_PIXEL_CYCLES_PER_LINE << 16);
+    uint32_t word = g_params.exposure_ticks | (PRISM_SH_TICKS_PER_LINE << 16) | (PRISM_PIXEL_CYCLES_PER_LINE << 20);
     for (uint32_t i = 0; i < WARMUP_DMA_CHUNK_LINES; i++)
     {
         g_warmup_dma_buf[i] = word;
@@ -264,10 +297,7 @@ static void scan_dma_prepare_bank(uint8_t bank)
     {
         uint32_t line_1_based = g_scan_prepared_lines + i + 1u;
         uint32_t last_flag = scan_last_flag_for_line(line_1_based);
-        if (g_scan_use_sm0)
-        {
-            g_scan_dma_buf_sm0[bank][i] = g_params.exposure_ticks | (PRISM_PIXEL_CYCLES_PER_LINE << 16);
-        }
+        g_scan_dma_buf_sm0[bank][i] = g_params.exposure_ticks | (PRISM_SH_TICKS_PER_LINE << 16) | (PRISM_PIXEL_CYCLES_PER_LINE << 20);
         g_scan_dma_buf_sm1[bank][i] = PRISM_CDS_CYCLES_PER_LINE;
         g_scan_dma_buf_sm2[bank][i] = last_flag | (PRISM_FIFO_CYCLES_PER_LINE << 16);
     }
@@ -277,11 +307,7 @@ static void scan_dma_prepare_bank(uint8_t bank)
 
 static void scan_dma_update_active_mask(void)
 {
-    g_scan_dma_active_mask = (1u << g_scan_dma_chan[1]) | (1u << g_scan_dma_chan[2]);
-    if (g_scan_use_sm0)
-    {
-        g_scan_dma_active_mask |= (1u << g_scan_dma_chan[0]);
-    }
+    g_scan_dma_active_mask = sm0_dma_irq_mask() | (1u << g_scan_dma_chan[1]) | (1u << g_scan_dma_chan[2]);
 }
 
 static void scan_dma_start_bank(uint8_t bank)
@@ -292,11 +318,8 @@ static void scan_dma_start_bank(uint8_t bank)
         return;
     }
 
-    if (g_scan_use_sm0)
-    {
-        dma_channel_set_read_addr(g_scan_dma_chan[0], g_scan_dma_buf_sm0[bank], false);
-        dma_channel_set_trans_count(g_scan_dma_chan[0], count, false);
-    }
+    dma_channel_set_read_addr(g_scan_dma_chan[0], g_scan_dma_buf_sm0[bank], false);
+    dma_channel_set_trans_count(g_scan_dma_chan[0], count, false);
 
     dma_channel_set_read_addr(g_scan_dma_chan[1], g_scan_dma_buf_sm1[bank], false);
     dma_channel_set_trans_count(g_scan_dma_chan[1], count, false);
@@ -309,7 +332,7 @@ static void scan_dma_start_bank(uint8_t bank)
 
 static bool scan_dma_all_channels_idle(void)
 {
-    if (g_scan_use_sm0 && dma_channel_is_busy(g_scan_dma_chan[0]))
+    if (dma_channel_is_busy(g_scan_dma_chan[0]))
     {
         return false;
     }
@@ -325,8 +348,8 @@ static void warmup_dma_start_chunk(void)
         return;
     }
 
-    dma_channel_set_read_addr(g_warmup_dma_chan, g_warmup_dma_buf, false);
-    dma_channel_set_trans_count(g_warmup_dma_chan, WARMUP_DMA_CHUNK_LINES, true);
+    dma_channel_set_read_addr(g_scan_dma_chan[0], g_warmup_dma_buf, false);
+    dma_channel_set_trans_count(g_scan_dma_chan[0], WARMUP_DMA_CHUNK_LINES, true);
 }
 
 static void dma_clear_runtime_buffers(void)
@@ -346,15 +369,13 @@ static void scan_dma_stop_internal(void)
     dma_channel_abort(g_scan_dma_chan[0]);
     dma_channel_abort(g_scan_dma_chan[1]);
     dma_channel_abort(g_scan_dma_chan[2]);
-    dma_channel_abort(g_warmup_dma_chan);
     irq_set_enabled(DMA_IRQ_1, false);
-    dma_hw->ints1 = g_scan_dma_irq_mask | g_warmup_dma_irq_mask;
+    dma_hw->ints1 = g_scan_dma_irq_mask;
 
     g_scan_target_lines = 0;
     g_scan_completed_lines = 0;
     g_scan_prepared_lines = 0;
     g_scan_dma_active_mask = 0;
-    g_scan_use_sm0 = true;
     g_scan_dma_running_bank = 0;
     g_scan_dma_pending_bank = 1;
     dma_clear_runtime_buffers();
@@ -363,7 +384,7 @@ static void scan_dma_stop_internal(void)
 
 static void scan_dma_irq_handler(void)
 {
-    uint32_t ints = dma_hw->ints1 & (g_scan_dma_irq_mask | g_warmup_dma_irq_mask);
+    uint32_t ints = dma_hw->ints1 & g_scan_dma_irq_mask;
     if (!ints)
     {
         return;
@@ -371,12 +392,16 @@ static void scan_dma_irq_handler(void)
 
     dma_hw->ints1 = ints;
 
-    if ((ints & g_warmup_dma_irq_mask) && g_warmup_active)
+    if (!g_scan_active)
     {
-        warmup_dma_start_chunk();
+        if ((ints & sm0_dma_irq_mask()) && g_warmup_active)
+        {
+            warmup_dma_start_chunk();
+        }
+        return;
     }
 
-    if (!(ints & g_scan_dma_active_mask) || !g_scan_active || !scan_dma_all_channels_idle())
+    if (!(ints & g_scan_dma_active_mask) || !scan_dma_all_channels_idle())
     {
         return;
     }
@@ -388,6 +413,10 @@ static void scan_dma_irq_handler(void)
     {
         g_scan_active = false;
         g_scan_done_pending = true;
+        if (g_warmup_active)
+        {
+            warmup_dma_start_chunk();
+        }
         return;
     }
 
@@ -409,11 +438,9 @@ static void scan_dma_irq_handler(void)
 static void scan_dma_init(void)
 {
     g_scan_dma_irq_mask = 0;
-    g_warmup_dma_irq_mask = 0;
     g_scan_dma_chan[0] = dma_claim_unused_channel(true);
     g_scan_dma_chan[1] = dma_claim_unused_channel(true);
     g_scan_dma_chan[2] = dma_claim_unused_channel(true);
-    g_warmup_dma_chan = dma_claim_unused_channel(true);
 
     for (int sm = (int)SCAN_DMA_SM_COUNT - 1; sm >= 0; sm--)    // Load SM2 and SM1 first
     {
@@ -426,15 +453,6 @@ static void scan_dma_init(void)
         dma_channel_set_irq1_enabled(g_scan_dma_chan[sm], true);
         g_scan_dma_irq_mask |= (1u << g_scan_dma_chan[sm]);
     }
-
-    dma_channel_config warmup_cfg = dma_channel_get_default_config(g_warmup_dma_chan);
-    channel_config_set_transfer_data_size(&warmup_cfg, DMA_SIZE_32);
-    channel_config_set_read_increment(&warmup_cfg, true);
-    channel_config_set_write_increment(&warmup_cfg, false);
-    channel_config_set_dreq(&warmup_cfg, pio_get_dreq(pio0, 0, true));
-    dma_channel_configure(g_warmup_dma_chan, &warmup_cfg, &pio0->txf[0], NULL, 0, false);
-    dma_channel_set_irq1_enabled(g_warmup_dma_chan, true);
-    g_warmup_dma_irq_mask = (1u << g_warmup_dma_chan);
 
     irq_set_exclusive_handler(DMA_IRQ_1, scan_dma_irq_handler);
     irq_set_enabled(DMA_IRQ_1, false);
@@ -452,7 +470,7 @@ static void warmup_start(void)
 
     timing_gen_reinit();
     warmup_dma_fill_buffer();
-    dma_hw->ints1 = g_warmup_dma_irq_mask | g_scan_dma_irq_mask;
+    dma_hw->ints1 = g_scan_dma_irq_mask;
     g_warmup_active = true;
     irq_set_enabled(DMA_IRQ_1, true);
     warmup_dma_start_chunk();
@@ -464,11 +482,15 @@ static void scan_engine_start(void)
 {
     uint32_t irq_state = save_and_disable_interrupts();
 
+    if (g_warmup_active)
+    {
+        dma_channel_abort(g_scan_dma_chan[0]);
+    }
+
     g_scan_target_lines = g_scan_lines;
     g_scan_completed_lines = 0;
     g_scan_prepared_lines = 0;
     g_scan_done_pending = false;
-    g_scan_use_sm0 = !g_warmup_active;
 
     g_scan_dma_running_bank = 0;
     g_scan_dma_pending_bank = 1;
@@ -479,7 +501,7 @@ static void scan_engine_start(void)
     scan_dma_prepare_bank(g_scan_dma_running_bank);
     scan_dma_prepare_bank(g_scan_dma_pending_bank);
 
-    dma_hw->ints1 = g_scan_dma_irq_mask | g_warmup_dma_irq_mask;
+    dma_hw->ints1 = g_scan_dma_irq_mask;
     irq_set_enabled(DMA_IRQ_1, true);
 
     g_scan_active = true;
@@ -606,11 +628,7 @@ static void process_usb_command(const usb_command_t *cmd)
             }
             apply_ad9826_params(&g_params);
             reinit_runtime_after_clock_change();
-            if (!prism_params_save(&g_params))
-            {
-                rsp.status = USB_STATUS_FLASH_FAIL;
-                break;
-            }
+            schedule_params_save();
         }
 
         if (!try_read_ad9826_param_by_hash(cmd->key_hash, &rsp.param_type, &rsp.param_len, rsp.param_data))
@@ -692,5 +710,6 @@ int main()
         }
 
         scan_engine_step();
+        flush_pending_params_save();
     }
 }

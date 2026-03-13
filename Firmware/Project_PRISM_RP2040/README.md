@@ -16,7 +16,7 @@ Existing project of high-performance open-sourced CCD cameras usually uses FPGA 
 
 Therefore, most projects, especially linear CCD projects, still sticks to MCUs or USB chips as timing generator ([smr547/cam86](https://github.com/smr547/cam86), 2016; [divertingPan/Line_Scan_Camera](https://github.com/divertingPan/Line_Scan_Camera), 2021; [openlux/openlux-v1](https://github.com/openlux/openlux-v1), 2022; [drmcnelson/TCD1304-Sensor-Device-with-Linear-Response-and-16-Bit-Differential-ADC](https://github.com/drmcnelson/TCD1304-Sensor-Device-with-Linear-Response-and-16-Bit-Differential-ADC), 2025). Although easier to develop, most of theses projects are limited to the MCUs, or limited to how these MCUs can generate clock signals, and could only reach a readout speed of 0.5-3 million pixels per second (MSPS). 
 
-Release of RP2040 changed the game. RP2040, as well as later RP2350, are shipped with an unique peripheral called Programmable I/O (PIO), which allows you to control IO pins by exact system clock. Thanks to this feature, the chip was quickly adopted in a wide range of applications, espacially in modding a multi-play-mode gaming device. In this project, by utilizing this feature, we are able to push our system pixel rate dramaticly up to 20.5MSPS without a FPGA.
+Release of RP2040 changed the game. RP2040, as well as later RP2350, are shipped with an unique peripheral called Programmable I/O (PIO), which allows you to control IO pins by exact system clock. Thanks to this feature, the chip was quickly adopted in a wide range of applications, espacially in modding a multi-play-mode gaming device. In this project, by utilizing this feature, we are able to push our system pixel rate dramaticly up to 20MSPS without a FPGA.
 
 ## Methodology
 
@@ -49,35 +49,39 @@ line_sig_init:                                  ; 54321(0) <- GPIO 5-0
     set pins, 0b01001       [1]     side 0      ; HHLLH(L), RS high CP low (16ns)
     set pins, 0b10001       [1]     side 0      ; HLLLH(L), RS low CP high (16ns)
     set pins, 0b00001       [15]    side 0      ; ┌ LLLLH(L), RW/CP low (128ns)
-    out x, 16               [15]    side 0      ; | LLLLH(L), SH high (8ns + 120ns)   Load & controls exposure time, as well as enable of exposure
+    out x, 16               [8]     side 0      ; | LLLLH(L), SH low (72ns)   Load & controls exposure time, as well as enable of exposure
+exp_ticks_loop:                                 ; |
+    jmp x-- exp_ticks_loop  [5]     side 0      ; | LLLLH(L), SH low (48ns)*(x+1)
                                                 ; └-> >= 200ns in total (t18)
+    out x, 4                [0]     side 0      ;   LLLLH(L), x=11
 sh_high_loop:                                   ; ┌
-    jmp x-- sh_high_loop    [11]    side 1      ; | LLLLH(H), SH high (96ns)*(x+1)
-                                                ; └-> >= 1000ns in total (t3)
-    out x, 16               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3800 (128ns)
+    jmp x-- sh_high_loop    [11]    side 1      ; | LLLLH(H), SH high (96ns*12=1152ns)
+                                                ; └-> 1000ns <= && <= 5000ns in total (t3)
+    out x, 12               [15]    side 0      ; ┌ LLLLH(L), SH low, Load counter value=3800 (128ns)
     irq wait  5             [14]    side 0      ; |  Sync with FIFO clk (120ns)    # only need 1 cycle delay, another 1 hidden before wareup. See readme
                                                 ; └-> >= 200ns in total (t19)
     irq clear 4             [0]     side 0      ; -2 clear IRQ4, for state machine syncing (expected 16ns, -8ns for MOSFET delay)
 line_sig_loop:
-    set pins, 0b01110       [0]     side 0      ; 0  S0 - LHHHL(L), RS high CP low (8ns)
-    set pins, 0b11110       [0]     side 0      ; 1  S1 - HHHHL(L), RS high CP high (8ns)
-    set pins, 0b10110       [0]     side 0      ; 2  S2 - LLHHL(L), RS low CP high (8ns)
-    set pins, 0b00110       [2]     side 0      ; 3  S3 - LLHHL(L), RS/CP low, ready for refence sample (8ns)
+    set pins, 0b11110       [1]     side 0      ; 0  S0 - LHHHL(L), RS high CP high (16ns)
+                                                ; 1
+    set pins, 0b10110       [0]     side 0      ; 2  S1 - LLHHL(L), RS low CP high (8ns)
+    set pins, 0b00110       [2]     side 0      ; 3  S2 - LLHHL(L), RS/CP low, ready for refence sample (8ns)
                                                 ; 4
                                                 ; 5
-    set pins, 0b00001       [3]     side 0      ; 6  S4 - LLLLH(L), CLK2B low, enable signal output (32ns) 
+    set pins, 0b00001       [3]     side 0      ; 6  S3 - LLLLH(L), CLK2B low, enable signal output, sample pixel after 20ns (32ns) 
                                                 ; 7
-                                                ; 8  
+                                                ; 8
                                                 ; 9
-    jmp x-- line_sig_loop   [1]     side 0      ; 10 S5 - LLLLH(L), jump to sig_out_loop_clock, sample pixel NOW (16ns)
+    jmp x-- line_sig_loop   [1]     side 0      ; 10 S4 - LLLLH(L), jump to sig_out_loop_clock (16ns)
                                                 ; 11
 .wrap
 ```
 
 Program of SM0 could be segmented into 2 parts: line preparation stage and pixel loop stage. In the line preparation stage, we just basically followed timing chart of TCD1708D, but serval small workarounds:
 
-- The high period of `SH` pin is controlled by low 16 bits data in each word of SM0's fifo, called `Exposure ticks` in our code. We read the value to register `x` each line, so we may control the exposure time with this, in a unit of 12 clock cycles. Program will then loop with the `jmp` command to the same line until enough delay. The minimal value of `Exposure ticks` is 10, which is (10+1)\*12\*8=1056ns, just above the minimal value of `SH` high.
-- We later read high 16 bits data in each word of SM0's fifo into register `x`, which controls the number of loops in later pixel clock stage. The number is fixed as 3800, see TCD1708D datasheet.
+- The high period of `SH` pin is controlled by low 16 bits data in each word of SM0's fifo, called `Exposure ticks` in our code. We read the value to register `x` each line, so we may control the exposure time with this, in a unit of 12 clock cycles. Program will then loop with the `jmp` command to the same line until enough delay. `Exposure ticks` now allows `0`, which makes the `SH` high time (0+1)\*12\*8=96ns.
+- Then we read 4 bits into register `x` for a 144-clocks `SH` period, where `x` is fixed to 11.
+- We finally read high 12 bits data in each word of SM0's fifo into register `x`, which controls the number of loops in later pixel clock stage. The number is fixed as 3800, see TCD1708D datasheet.
 
 The later pixel loop stage is just some regular IO sets, and another `jmp` command determine whether to continue pixel clocks or go back to line preparation. For each pixel loop, state 0, 1, 2, and 4 has a 1 clock delay after 1 clock for each execution, and state 3 has 3, which takes us 12 SM clocks each pixel in sum.
 
@@ -93,19 +97,19 @@ cds_line_init:
     out x, 32               [0] side 0b000      ;       Load counter value=3800
     irq wait 4              [2] side 0b000      ;       State machine syncing. Set IRQ4 and wait for clear, then wait 1 cycle for loop t=0
                                                 ; 0     Detects IRQ clear, exit stall state
-                                                ; 1     
-cds_pixel_loop:                                 ;       GPIO 14-12/18-16
-    set pins 0b0100         [1] side 0b100      ; 2     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
+                                                ; 1   
+cds_pixel_loop:                                 ;       GPIO 15-12/18-16
+    set pins 0b0100         [2] side 0b100      ; 2     S0 - HLL, CLK low, CDSCLK2 low, CDSCLK1 high, LSB out
                                                 ; 3
-    set pins 0b0000         [1] side 0b000      ; 4     S1 - LLL, CLK low, CDSCLK2 low, CDSCLK1 low, sampleing reference in 2ns
-                                                ; 5
-    set pins 0b0010         [1] side 0b010      ; 6     S2 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low
+                                                ; 4
+    set pins 0b0010         [2] side 0b010      ; 5     S1 - LHL, CLK low, CDSCLK2 high, CDSCLK1 low, sampleing reference in 2ns
+                                                ; 6
                                                 ; 7
-    set pins 0b0011         [1] side 0b011      ; 8     S3 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
+    set pins 0b0011         [1] side 0b011      ; 8     S2 - LHH, CLK high, CDSCLK2 high, CDSCLK1 low, MSB out
                                                 ; 9
-    set pins 0b0001         [1] side 0b001      ; 10    S4 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
+    set pins 0b0001         [1] side 0b001      ; 10    S3 - LLH, CLK high, CDSCLK2 low, CDSCLK1 high, sampleing signal in 2ns
                                                 ; 11
-    jmp x-- cds_pixel_loop  [1] side 0b001      ; 0     S5 - LLH, Check whether to continue pixel loop
+    jmp x-- cds_pixel_loop  [1] side 0b001      ; 0     S4 - LLH, Check whether to continue pixel loop
                                                 ; 1
 .wrap
 ```
@@ -143,7 +147,7 @@ fifo_line_sync_end:
 
 Program of SM2 reads 2x16 bits data into register `y` and `x` seperately in each row. Register `x` works as pixel loop counter like SM0 and SM1, but its value is 7601(3801*2-1) instead of 3800, since our ADCs are sampling CCD outputs into 16-bit values. Register `y` is an indicator of manual packet send. The USB buffer had been configured to send a package each time it got 512 bytes, however, our ADCs gives 15206 bytes (7603 words, 7602 row words + extra 2 bytes when exiting pixel loop, we don't have enough time to pull `SLWR` high), which could not be divided by 512. Thus, we need this indicator to send the extra bytes everytime we want to end a transaction.
 
-You may have also noticed, SM2 is assigned pin 19 & 21 for `SLWR` and `PKTEND` signal, but we are using a 3-bit value in side-set, in which bit-0 is `SLWR` and bit-2 is `PKTEND`. This is due to PIO SMs could only be assigned with continous pin ranges, and we have to put pin 20 here and ignore it. In fact, this is a mistake, pin 19 and pin 20, `SLWR` and `IFCLK` shuold have changed their position in curcit design, but later we found the board is still running, and we do need another SM for a freely running `IFCLK`, so it's kept here.
+You may have also noticed, SM2 is assigned pin 19 & 21 for `SLWR` and `PKTEND` signal, but we are using a 3-bit value in side-set, in which bit-0 is `SLWR` and bit-2 is `PKTEND`. This is due to PIO SMs could only be assigned with continous pin ranges, and we have to put pin 20 here and ignore it. In fact, this is a mistake, pin 19 and pin 20, `SLWR` and `IFCLK` shuold have changed their position in circuit design, but later we found the board is still running, and we do need another SM for a freely running `IFCLK`, so it's kept here.
 
 ![CY7C68013A Timing Sequence](../../Resources/CY7C68013A_Timing_Sequence.png)
 
@@ -199,18 +203,18 @@ Then, after the 14 clocks delay, SM0 runs `irq clear 4` to wake up SM1 and SM2. 
 | -2            |            |               | irq clear 4   | (irq wait 4)     | (irq wait 4)        |     |
 | -1            |            |               | (MOS delay)   | Exit Stall State | Exit Stall State    |     |
 | 0             | 0          | 0             | S0            | delay 1/2        | delay 1/3           | 1   |
-| 1             |            | 1             | S1            | delay 2/2        | delay 2/3           |     |
-| 2             |            | 2             | S2            | S0               | delay 3/3           |     |
-| 3             |            | 3             | S3 (ref. out) | delay 1          | out x               | 0   |
-| 4             |            | 4             | delay 1/2     | S1 (ref. sample) | delay 1/2           |     |
-| 5             |            | 5             | delay 2/2     | delay 1          | delay 2/2           |     |
-| 6             |            | 6             | S3            | S2               | S0 (ADC bus sample) | 1   |
-| 7             |            | 7             | delay 1/3     | delay 1          | delay 1/2           |     |
-| 8             |            | 8             | delay 2/3     | S3               | delay 1/2           |     |
+| 1             |            | 1             | delay 1       | delay 2/2        | delay 2/3           |     |
+| 2             |            | 2             | S1            | S0               | delay 3/3           |     |
+| 3             |            | 3             | S2 (ref. out) | delay 1/2        | out x               | 0   |
+| 4             |            | 4             | delay 1/2     | delay 1/2        | delay 1/2           |     |
+| 5             |            | 5             | delay 2/2     | S1 (ref. sample) | delay 2/2           |     |
+| 6             |            | 6             | S3            | delay 1/2        | S0 (ADC bus sample) | 1   |
+| 7             |            | 7             | delay 1/3     | delay 2/2        | delay 1/2           |     |
+| 8             |            | 8             | delay 2/3     | S2               | delay 1/2           |     |
 | 9             |            | 9             | delay 3/3     | delay 1          | S1                  | 0   |
-| 10            |            | 10            | S4 (sig. out) | S4 (sig. sample) | delay 1/2           |     |
+| 10            |            | 10            | S4 (sig. out) | S3 (sig. sample) | delay 1/2           |     |
 | 11            |            | 11            | delay 1       | delay 1          | delay 2/2           |     |
-| 12            | 1          | 0             | S0            | S5               | S0 (ADC bus sample) | 1   |
+| 12            | 1          | 0             | S0            | S4               | S0 (ADC bus sample) | 1   |
 | 13            |            | 1             | S1            | delay 1          | delay 1/2           |     |
 | 14            |            | 2             | S2            | S0               | delay 2/2           |     |
 
@@ -222,9 +226,9 @@ For the rest of pixel clocks, they are exactly identical to CLK#3-12. After that
 
 | Absolute CLK# | Pixel CLK# | Relative CLK# | SM0            | SM1              | SM2                 | SM3 |
 | ------------- | ---------- | ------------- | -------------- | ---------------- | ------------------- | --- |
-| 45600         | 3800       | 10            | S4 (sig. out)  | S4 (sig. sample) | delay 1/2           | 0   |
+| 45600         | 3800       | 10            | S4 (sig. out)  | S3 (sig. sample) | delay 1/2           | 0   |
 | 45601         |            | 11            | delay 1        | delay 1          | delay 2/2           |     |
-| 45602         | X          |               | set pins       | S5               | S0 (ADC bus sample) | 1   |
+| 45602         | X          |               | set pins       | S4               | S0 (ADC bus sample) | 1   |
 | 45603         |            |               | delay 1        | delay 1          | delay 1/2           |     |
 | 45604         |            |               | set pins       | ...              | delay 2/2           |     |
 | 45605         |            |               | delay 1        |                  | S1                  | 0   |
@@ -234,8 +238,11 @@ For the rest of pixel clocks, they are exactly identical to CLK#3-12. After that
 | ...           |            |               | ...            |                  |                     | ... |
 | 45631         |            |               | delay 15/15    |                  |                     | 1   |
 | 45632         |            |               | out x          |                  |                     |     |
-| 45633         |            |               | delay 1/15     |                  |                     | 0   |
+| 45633         |            |               | delay 1/8      |                  |                     | 0   |
 | ...           |            |               | ...            |                  |                     | ... |
+| 45641         |            |               | Exposure ticks |                  |                     | 0   |
+| ...           |            |               | ...            |                  |                     | ... |
+| 45647         |            |               | out x          |                  |                     | 0   |
 | 45648         |            |               | delay 12*(x+1) |                  |                     | 1   |
 
 Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. The reason why the delay here is degisned as 12*(x+1) is, 12 clock cycles could make SM3 run 2 entire cycles. We have aligned SM0's execution and SM3's using the tons of delay avaliable in line preparation, and it will make aligning following instructions much more easier.
@@ -245,11 +252,11 @@ Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. Th
 | 45648         |            |               | delay 12*(x+1)   |                  |                  | 1                   |
 | ...           |            |               | ...              |                  |                  | ...                 |
 | 45791         |            |               | delay 12/12      |                  |                  | 0                   |
-| 45792         |            |               | delay 1/15       |                  |                  | 1                   |
+| 45792         |            |               | out x            |                  |                  | 1                   |
+| 45793         |            |               | delay 1/15       |                  |                  |                     |
 | ...           |            |               | ...              |                  |                  | ...                 |
-| 45806         |            |               | delay 15/15      |                  |                  | 1                   |
-| 45807         |            |               | irq wait 5       |                  |                  | 0                   |
-| 45808         |            |               | Stalled          |                  |                  |                     |
+| 45807         |            |               | delay 15/15      |                  |                  | 0                   |
+| 45808         |            |               | irq wait 5       |                  |                  |                     |
 | 45809         |            |               | Stalled          |                  |                  |                     |
 | 45810         |            |               | Stalled          |                  |                  | irq clear 5, side 1 |
 | 45811(-17)    |            |               | Exit Stall State |                  |                  |                     |
@@ -258,39 +265,46 @@ Here we suppose `Exposure ticks` is 11, and `SH` will be set high for 1152ns. Th
 | 45825(-3)     |            |               | delay 14/14      |                  |                  | 0                   |
 | 45826(-2)     |            |               | irq clear 4      | (irq wait 4)     | (irq wait 4)     |                     |
 | 45827(-1)     |            |               | (MOS delay)      | Exit Stall State | Exit Stall State |                     |
-| 45828(0)      | 0          | 0             | S0               | delay 1/2        | delay 1/3        | 1                   |
+| 45827(0)      | 0          | 0             | S0               | delay 1/2        | delay 1/3        | 1                   |
 
-After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45828 clock cycles to run, as `Exposure ticks`=11. Excluding the `SH` delay, it will be 45684 clocks.
+After the `SH` delay, we continue to the 15-clocks delay of `jmp` command. After that, we encounter `irq wait 5`, set irq 5 and wait for SM3 to clear. The timing of this command just locate serval clock before next `irq clear 5` of SM3, and SM0 will not wait for too long. As SM0 wake up, the state of all SMs goes back to the exact same as we discussed at first place. Then we may conclude that, for each line of scan, it takes 45827 clock cycles to run, as `Exposure ticks`=0.
 
 For a full timing sequence, please check [State Machine Sequence.xlsx](<State Machine Sequence.xlsx>).
 
 ### Exposure Time Control
 
-Following the timing table above, in current settings, we need 45684 clocks each scan row (exclude expsorure ticks).
+Following the timing table above, in current settings, we need 45827 clocks each scan row (when expsorure ticks = 0).
 
 These timing numbers assume the default `125MHz` RP2040 system clock. If you store a different `prism.sys_clock_khz` value through the control interface, the firmware reapplies that frequency on boot and the real-time exposure/readout durations scale with the new clock.
 
 And here is a quick lookup table if you want to change line exposure time.
 
-| exposure ticks | row clock cycles | time per frame (ms) | shutter speed   | data rate   |
-| -------------- | ---------------- | ------------------- | --------------- | ----------- |
-| ~~0~~          | ~~45648~~        | ~~0.365184~~        | ~~1/2738.3456~~ | N/A         |
-| 10             | 45816            | 0.36624             | 1/2730.45       | ~40.81MiB/s |
-| 363            | 50004            | 0.400032            | 1/2499.8        | ~36.65MiB/s |
-| 1404           | 62496            | 0.499968            | 1/2000.1280     | ~29.62MiB/s |
-| 2706           | 78120            | 0.62496             | 1/1600.1024     | ~23.62MiB/s |
-| 4529           | 99996            | 0.799968            | 1/1250.05       | ~18.38MiB/s |
-| 6613           | 125004           | 1.000032            | 1/999.968       | ~14.68MiB/s |
+| exposure ticks | scan row cycles | time per frame (ms) | shutter speed |
+| -------------- | --------------- | ------------------- | ------------- |
+| 0              | 45827           | 0.366664            | 1/2727.6496   |
+| 695            | 49997           | 0.399976            | 1/2500.1500   |
+| 2779           | 62501           | 0.500008            | 1/1999.9860   |
+| 5383           | 78125           | 0.625               | 1/1600        |
+| 9029           | 100001          | 0.800008            | 1/1249.9875   |
+| 13195          | 124997          | 0.999976            | 1/1000.0240   |
+| 18404          | 156251          | 1.250008            | 1/799.9949    |
+| 27084          | 208331          | 1.666648            | 1/600.0067    |
+| 34029          | 250001          | 2.000008            | 1/499.998     |
+| 57466          | 390623          | 3.124984            | 1/320.0016    |
+| 65535          | 439037          | 3.512296            | 1/284.7410    |
 
-### Overclocking
 
-The RP2040 could be easily overclocked, and no extra modifications required as clock speed <= 270Mhz. However, pushing the clock speed too hard will damage our timing design, and ADC may not able to sample correct voltage. This section is just for a record, it is not recommended to overclock in actual use.
+### System Clock
 
-| clock speed | exposure ticks | row clock cycles | time per frame (ms) | shutter speed | data rate   |
-| ----------- | -------------- | ---------------- | ------------------- | ------------- | ----------- |
-| 125Mhz      | 10             | 45816            | 0.36624             | 1/2730.45     | ~40.59MiB/s |
-| 133MHz      | 11             | 45828            | 0.34421             | 1/2905.20     | ~43.66MiB/s |
-| 135MHz      | 11             | 45828            | 0.33911             | 1/2948.89     | ~44.38MiB/s |
+The RP2040 could be easily overclocked, and no extra modifications required as clock speed <= 270Mhz. However, pushing the clock speed too hard will damage our timing design, and ADC may not able to sample correct voltage. This section is just for a record, it is not recommended to overclock in actual use. As frequency increases, you may need to adjust both offset and gain of ADCs to a lower value to keep everything running. 
+
+Beside overclocking, underclocking is now also supported. You may reduce the system clock to get loger exposure time.
+
+| clock frequency | exposure ticks | row clock cycles | time per frame (ms) | shutter speed | data rate   |
+| --------------- | -------------- | ---------------- | ------------------- | ------------- | ----------- |
+| 125Mhz          | 0              | 45827            | 0.366664            | 1/2727.6496   | ~39.52MiB/s |
+| 130MHz          | 0              | 45827            | 0.352515            | 1/2836.7556   | ~41.13MiB/s |
+| 133MHz          | 0              | 45827            | 0.344564            | 1/2902.2192   | ~42.04MiB/s |
 
 ## Conclusion
 

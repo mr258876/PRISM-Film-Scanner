@@ -13,8 +13,10 @@
 #include "pico/stdlib.h"
 
 #define PRISM_PARAM_STORE_MAGIC     0x50535452u
-#define PRISM_PARAM_STORE_VERSION   1u
+#define PRISM_PARAM_STORE_VERSION   2u
+#define PRISM_PARAM_STORE_VERSION_LEGACY 1u
 #define PRISM_PARAM_TABLE_SLOTS     64u
+#define PRISM_PARAM_STORE_SECTORS   2u
 
 #define PRISM_FLASH_ERASED_U16      0xFFFFu
 #define PRISM_FLASH_ERASED_U32      0xFFFFFFFFu
@@ -29,8 +31,8 @@ typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint16_t version;
     uint16_t slot_count;
+    uint32_t generation;
     uint32_t reserved0;
-    uint32_t reserved1;
 } prism_param_store_header_t;
 
 typedef struct __attribute__((packed)) {
@@ -55,6 +57,16 @@ typedef struct {
     uint32_t flash_offset;
     uint8_t sector_buf[FLASH_SECTOR_SIZE];
 } flash_write_ctx_t;
+
+typedef struct {
+    bool valid;
+    uint32_t flash_offset;
+    uint32_t generation;
+    const uint8_t *sector;
+} prism_store_candidate_t;
+
+static uint32_t g_active_store_offset = 0;
+static uint32_t g_active_store_generation = 0;
 
 static uint32_t encode_adc1_gain(const prism_params_t *params) { return params->adc1_gain; }
 static uint32_t encode_adc1_offset(const prism_params_t *params) { return params->adc1_offset; }
@@ -271,30 +283,27 @@ static uint32_t params_flash_offset(void)
     return PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 }
 
-void prism_params_set_defaults(prism_params_t *params)
+static uint32_t params_flash_offset_for_index(uint32_t index)
 {
-    params->adc1_gain = 0;
-    params->adc1_offset = 0;
-    params->adc2_gain = 0;
-    params->adc2_offset = 0;
-    params->exposure_ticks = PRISM_DEFAULT_EXPOSURE_TICKS;
-    params->sys_clock_khz = PRISM_DEFAULT_SYS_CLOCK_KHZ;
+    return PICO_FLASH_SIZE_BYTES - ((index + 1u) * FLASH_SECTOR_SIZE);
 }
 
-bool prism_params_load(prism_params_t *params)
+static bool store_header_valid(const prism_param_store_header_t *header)
 {
-    ensure_hashes_initialized();
+    return header->magic == PRISM_PARAM_STORE_MAGIC &&
+           header->version == PRISM_PARAM_STORE_VERSION &&
+           header->slot_count == PRISM_PARAM_TABLE_SLOTS;
+}
 
-    uint32_t flash_offset = params_flash_offset();
-    const uint8_t *sector = (const uint8_t *)(XIP_BASE + flash_offset);
-    const prism_param_store_header_t *header = (const prism_param_store_header_t *)sector;
+static bool store_header_valid_legacy(const prism_param_store_header_t *header)
+{
+    return header->magic == PRISM_PARAM_STORE_MAGIC &&
+           header->version == PRISM_PARAM_STORE_VERSION_LEGACY &&
+           header->slot_count == PRISM_PARAM_TABLE_SLOTS;
+}
 
-    if (header->magic != PRISM_PARAM_STORE_MAGIC ||
-        header->version != PRISM_PARAM_STORE_VERSION ||
-        header->slot_count != PRISM_PARAM_TABLE_SLOTS) {
-        return false;
-    }
-
+static bool decode_store_sector(const uint8_t *sector, prism_params_t *params)
+{
     const prism_param_slot_t *slots = store_slots(sector);
     bool any_found = false;
 
@@ -316,20 +325,89 @@ bool prism_params_load(prism_params_t *params)
     return any_found;
 }
 
+void prism_params_set_defaults(prism_params_t *params)
+{
+    params->adc1_gain = 0;
+    params->adc1_offset = 0;
+    params->adc2_gain = 0;
+    params->adc2_offset = 0;
+    params->exposure_ticks = PRISM_DEFAULT_EXPOSURE_TICKS;
+    params->sys_clock_khz = PRISM_DEFAULT_SYS_CLOCK_KHZ;
+}
+
+bool prism_params_load(prism_params_t *params)
+{
+    ensure_hashes_initialized();
+
+    prism_store_candidate_t best = {0};
+
+    for (uint32_t i = 0; i < PRISM_PARAM_STORE_SECTORS; i++) {
+        uint32_t flash_offset = params_flash_offset_for_index(i);
+        const uint8_t *sector = (const uint8_t *)(XIP_BASE + flash_offset);
+        const prism_param_store_header_t *header = (const prism_param_store_header_t *)sector;
+
+        if (!store_header_valid(header)) {
+            continue;
+        }
+
+        if (!best.valid || header->generation > best.generation) {
+            best.valid = true;
+            best.flash_offset = flash_offset;
+            best.generation = header->generation;
+            best.sector = sector;
+        }
+    }
+
+    if (best.valid) {
+        if (!decode_store_sector(best.sector, params)) {
+            return false;
+        }
+
+        g_active_store_offset = best.flash_offset;
+        g_active_store_generation = best.generation;
+        return true;
+    }
+
+    uint32_t legacy_flash_offset = params_flash_offset();
+    const uint8_t *legacy_sector = (const uint8_t *)(XIP_BASE + legacy_flash_offset);
+    const prism_param_store_header_t *legacy_header = (const prism_param_store_header_t *)legacy_sector;
+    if (!store_header_valid_legacy(legacy_header)) {
+        return false;
+    }
+
+    if (!decode_store_sector(legacy_sector, params)) {
+        return false;
+    }
+
+    g_active_store_offset = legacy_flash_offset;
+    g_active_store_generation = 0;
+    return true;
+}
+
 bool prism_params_save(const prism_params_t *params)
 {
     ensure_hashes_initialized();
 
     static flash_write_ctx_t ctx;
     memset(&ctx, 0xFF, sizeof(ctx));
-    ctx.flash_offset = params_flash_offset();
+    uint32_t target_index = 0;
+    if (g_active_store_offset != 0) {
+        for (uint32_t i = 0; i < PRISM_PARAM_STORE_SECTORS; i++) {
+            if (params_flash_offset_for_index(i) == g_active_store_offset) {
+                target_index = (i + 1u) % PRISM_PARAM_STORE_SECTORS;
+                break;
+            }
+        }
+    }
+
+    ctx.flash_offset = params_flash_offset_for_index(target_index);
 
     prism_param_store_header_t *header = (prism_param_store_header_t *)ctx.sector_buf;
     header->magic = PRISM_PARAM_STORE_MAGIC;
     header->version = PRISM_PARAM_STORE_VERSION;
     header->slot_count = PRISM_PARAM_TABLE_SLOTS;
+    header->generation = g_active_store_generation + 1u;
     header->reserved0 = PRISM_FLASH_ERASED_U32;
-    header->reserved1 = PRISM_FLASH_ERASED_U32;
 
     prism_param_slot_t *slots = store_slots_mut(ctx.sector_buf);
 
@@ -350,5 +428,11 @@ bool prism_params_save(const prism_params_t *params)
     }
 
     int rc = flash_safe_execute(flash_write_page_cb, &ctx, 1000);
-    return rc == PICO_OK;
+    if (rc != PICO_OK) {
+        return false;
+    }
+
+    g_active_store_offset = ctx.flash_offset;
+    g_active_store_generation = header->generation;
+    return true;
 }

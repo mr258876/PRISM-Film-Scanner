@@ -168,7 +168,7 @@ Default values currently compiled into firmware:
 - `prism.exposure_ticks = 1404`
 - `prism.sys_clock_khz = 125000`
 
-`prism.sys_clock_khz` controls the RP2040 system clock in kHz. The default is `125000`, and if a host stores a higher valid value, the firmware reapplies it during boot before initializing the timing generators.
+`prism.sys_clock_khz` controls the RP2040 system clock in kHz. The default is `125000`, the accepted range is `30000` to `200000`, and if a host stores a valid value in that range, the firmware reapplies it during boot before initializing the timing generators.
 
 The firmware hashes parameter keys internally with 32-bit FNV-1a. A host application must calculate the same hash for the string key before calling the get/set commands.
 
