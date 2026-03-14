@@ -12,8 +12,8 @@ This project aims to develop an open-source high-resolution film scanner. The su
   ![Imaging Board PoC](/Resources/Imaging_Board_PoC.jpg)
 
   *Forgive the poor soldering
+- Finished - E-mount apapter (Mar 14, 2026)
 - In progress - Control software
-- In progress - Lens system
 - In progress - Synchronized RGB light source
 - Planned - Auto focus system
 - Planned - Film holder & feeding system
