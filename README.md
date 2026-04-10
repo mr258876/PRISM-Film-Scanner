@@ -23,19 +23,19 @@ This project aims to develop an open-source high-resolution film scanner. The su
 
 At the current stage, the repository is best treated as a prototype bring-up package instead of a finished end-user product. It documents the current electrical prototype and the firmware/software needed to exercise it, but it is not yet a full scanner replication guide with finalized optics, mechanics, autofocus, or film transport.
 
-To reproduce the current milestone, you need the hardware in `Hardware/`, the RP2040 timing-generator firmware, the CY7C68013A USB FIFO firmware, and the Windows host utility in `Host Software/`.
+To reproduce the current milestone, you need the scanner hardware package in `100_Scanner_Hardware/`, the RP2040 timing-generator firmware and CY7C68013A USB FIFO firmware in `100_Scanner_Firmware/`, and the Windows host utility in `Host Software/`.
 
-1. Review the hardware package in `Hardware/` and prepare a board that matches the committed schematic and Gerber files.
+1. Review the hardware package in `100_Scanner_Hardware/` and prepare a board that matches the committed schematic and Gerber files.
 2. Flash or build firmware for both RP2040 and CY7C68013A.
    - Flash precompiled firmware
-      - See [Firmware Readme](/Firmware/README.md)
+      - See [Firmware Readme](/100_Scanner_Firmware/README.md)
    - or build the firmware yourself
-      *  Build and flash the RP2040 firmware in `Firmware/Project_PRISM_RP2040/`.
+      *  Build and flash the RP2040 firmware in `100_Scanner_Firmware/Project_PRISM_RP2040/`.
          - The documented workflow is Windows + VSCode + the `Raspberry Pi Pico` extension.
-         - See `Firmware/Project_PRISM_RP2040/README.md` for the timing-design notes and build entry point.
-      * Build and flash the CY7C68013A firmware in `Firmware/Project_PRISM_CY7C68013A/`.
+         - See `100_Scanner_Firmware/Project_PRISM_RP2040/README.md` for the timing-design notes and build entry point.
+      * Build and flash the CY7C68013A firmware in `100_Scanner_Firmware/Project_PRISM_CY7C68013A/`.
          - This firmware depends on vendor files from the Infineon FX2LP SDK and is not fully self-contained in this repository.
-         - See `Firmware/Project_PRISM_CY7C68013A/README.md` for the required SDK files and EEPROM flashing steps.
+         - See `100_Scanner_Firmware/Project_PRISM_CY7C68013A/README.md` for the required SDK files and EEPROM flashing steps.
 3. Initialize the host software submodule if needed and build the desktop utility in `Host Software/`.
    - If you cloned without submodules, run `git submodule update --init --recursive`.
    - See `Host Software/README.md` for Windows, .NET, and Visual Studio requirements.
@@ -43,22 +43,29 @@ To reproduce the current milestone, you need the hardware in `Hardware/`, the RP
    - Project PRISM Control Interface (RP2040): `VID 0x1D50`, `PID 0x619D`
    - Project PRISM FIFO Buffer (CY7C68013A): `VID 0x1D50`, `PID 0x619C`
 5. Use the host utility or your own tooling against the RP2040 control interface to configure scan parameters and start bring-up.
-   - Command and frame definitions are documented in `Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md`.
+   - Command and frame definitions are documented in `100_Scanner_Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md`.
 
 
 ## Project Structure
 
-- `Hardware/` - PCB design package, schematic export, Gerber archive, and hardware bring-up notes for the current prototype.
-- `Firmware/Project_PRISM_RP2040/` - RP2040 firmware that generates CCD/ADC timing, exposes the USB control interface, and stores persistent scan parameters.
-- `Firmware/Project_PRISM_CY7C68013A/` - CY7C68013A/FX2LP firmware used as the synchronous USB FIFO buffer for ADC data.
+- `100_Scanner_Hardware/` - scanner mainboard PCB design package, schematic export, Gerber archive, and hardware bring-up notes for the current prototype.
+- `100_Scanner_Firmware/` - prebuilt firmware images plus source trees for the scanner electronics.
+  - `Project_PRISM_RP2040/` - RP2040 firmware that generates CCD/ADC timing, exposes the USB control interface, and stores persistent scan parameters.
+  - `Project_PRISM_CY7C68013A/` - CY7C68013A/FX2LP firmware used as the synchronous USB FIFO buffer for ADC data.
+- `101_BackLight_Hardware/` - backlight hardware work area for the illumination subsystem.
+- `102_PeriControl_Hardware/` - hardware work area for peripheral-control electronics.
+- `102_PeriControl_Firmware/` - firmware work area for the peripheral-control subsystem.
 - `Host Software/` - Windows host utility for USB debugging, scan debugging, and early-stage control of supported scanner hardware.
+- `Documents/` - datasheets and reference PDFs for the main electrical components.
+- `Lens Adapter/` - mechanical adapter assets for the current optical setup.
 - `Resources/` - timing diagrams and reference images used by the firmware design notes.
 
 ## If You're Curious
-- [Hardware Requirements and Bring-up](Hardware/README.md)
-- [Host Software README](https://github.com/mr258876/PRISM-Utility/blob/main/README.md)
-- [Timing Sequence Design of Imaging Subsystem - Readme of RP2040 Firmware](Firmware/Project_PRISM_RP2040/README.md)
-- [RP2040 Control Interface](Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md)
+- [Hardware Requirements and Bring-up](100_Scanner_Hardware/README.md)
+- [Firmware Overview](100_Scanner_Firmware/README.md)
+- [Host Software README](Host%20Software/README.md)
+- [Timing Sequence Design of Imaging Subsystem - Readme of RP2040 Firmware](100_Scanner_Firmware/Project_PRISM_RP2040/README.md)
+- [RP2040 Control Interface](100_Scanner_Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md)
 
 ## Credits
 - [jackw01/scanlight](https://github.com/jackw01/scanlight)
@@ -71,11 +78,11 @@ This repository contains hardware design files and firmware/software source code
 under different licenses. Unless a file states otherwise via `SPDX-License-Identifier`,
 the following defaults apply:
 
-1) `Hardware/`
+1) `100_Scanner_Hardware/`, `101_BackLight_Hardware/`, `102_PeriControl_Hardware/`, and `Lens Adapter/`
    - License: [CERN Open Hardware Licence v2 - Weakly Reciprocal](LICENSES/CERN-OHL-W-2.0.txt)
    - SPDX: `CERN-OHL-W-2.0`
 
-2) `Firmware/`
+2) `100_Scanner_Firmware/` and `102_PeriControl_Firmware/`
    - License: [MIT License](LICENSES/MIT.txt)
    - SPDX: `MIT`
 

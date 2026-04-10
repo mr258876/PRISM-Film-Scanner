@@ -25,10 +25,10 @@ This is still a development-stage design. Optical parts, illumination, autofocus
 Use this as a minimal prototype bring-up checklist.
 
 1. Inspect the schematic PDF and confirm your assembled board matches the committed revision.
-2. Program the RP2040 using the workflow documented in `../Firmware/Project_PRISM_RP2040/README.md`.
-3. Program the CY7C68013A EEPROM using the workflow documented in `../Firmware/Project_PRISM_CY7C68013A/README.md`.
+2. Program the RP2040 using the workflow documented in `../100_Scanner_Firmware/Project_PRISM_RP2040/README.md`.
+3. Program the CY7C68013A EEPROM using the workflow documented in `../100_Scanner_Firmware/Project_PRISM_CY7C68013A/README.md`.
 4. Connect the board to the host PC and verify that the RP2040 USB control interface enumerates as `VID 0x1D50` and `PID 0x619D`.
-5. Use the command protocol documented in `../Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md` to:
+5. Use the command protocol documented in `../100_Scanner_Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md` to:
    - read back persisted parameters,
    - set scan line count,
    - start warmup or scan commands,
