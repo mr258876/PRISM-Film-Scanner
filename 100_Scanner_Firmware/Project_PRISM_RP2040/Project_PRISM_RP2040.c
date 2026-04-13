@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "prism.pio.h"
+#include "pericontrol_link.h"
 #include "Pinouts.h"
 #include "AD9826_SPI/AD9826_SPI.h"
 #include "persistent_params.h"
@@ -90,6 +91,80 @@ static void flush_pending_params_save(void)
     }
 
     g_params_save_deadline_us = now + ((uint64_t)PRISM_PARAMS_SAVE_DEBOUNCE_MS * 1000u);
+}
+
+
+static uint8_t map_pericontrol_link_result_to_usb_status(pericontrol_link_result_t result)
+{
+    switch (result)
+    {
+    case PERICONTROL_LINK_TIMEOUT:
+        return USB_STATUS_SUBORDINATE_TIMEOUT;
+    case PERICONTROL_LINK_BAD_RESPONSE:
+    case PERICONTROL_LINK_CRC_MISMATCH:
+        return USB_STATUS_SUBORDINATE_LINK_ERROR;
+    case PERICONTROL_LINK_INVALID_ARGUMENT:
+        return USB_STATUS_PAYLOAD_INVALID;
+    default:
+        return USB_STATUS_BAD_FRAME;
+    }
+}
+
+static bool process_debug_passthrough_command(const usb_command_t *cmd, usb_response_t *rsp)
+{
+    if (cmd->debug_payload_len < 2u)
+    {
+        return false;
+    }
+
+    uint8_t target = cmd->debug_payload[0];
+    uint8_t pericontrol_opcode = cmd->debug_payload[1];
+    if (target != USB_DEBUG_TARGET_BOARD102)
+    {
+        rsp->status = USB_STATUS_DEBUG_TARGET_UNSUPPORTED;
+        rsp->debug_payload_len = 0u;
+        return true;
+    }
+
+    uint16_t tx_payload_len = (uint16_t)(cmd->debug_payload_len - 2u);
+    if (tx_payload_len > USB_DEBUG_PASSTHROUGH_MAX_SUBPAYLOAD)
+    {
+        rsp->status = USB_STATUS_PAYLOAD_INVALID;
+        rsp->debug_payload_len = 0u;
+        return true;
+    }
+
+    uint8_t pericontrol_status = 0u;
+    uint16_t pericontrol_payload_len = 0u;
+    uint8_t pericontrol_payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    pericontrol_link_result_t link_result = pericontrol_link_transceive(pericontrol_opcode,
+                                                                        &cmd->debug_payload[2],
+                                                                        tx_payload_len,
+                                                                        &pericontrol_status,
+                                                                        &pericontrol_payload_len,
+                                                                        pericontrol_payload,
+                                                                        sizeof(pericontrol_payload));
+    if (link_result != PERICONTROL_LINK_OK)
+    {
+        rsp->status = map_pericontrol_link_result_to_usb_status(link_result);
+        rsp->debug_payload_len = 0u;
+        return true;
+    }
+
+    if ((uint16_t)(pericontrol_payload_len + 3u) > USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        rsp->debug_payload_len = 0u;
+        return true;
+    }
+
+    rsp->status = USB_STATUS_OK;
+    rsp->debug_payload[0] = target;
+    rsp->debug_payload[1] = pericontrol_opcode;
+    rsp->debug_payload[2] = pericontrol_status;
+    memcpy(&rsp->debug_payload[3], pericontrol_payload, pericontrol_payload_len);
+    rsp->debug_payload_len = (uint16_t)(pericontrol_payload_len + 3u);
+    return true;
 }
 
 static inline uint32_t sm0_dma_irq_mask(void)
@@ -677,6 +752,13 @@ static void process_usb_command(const usb_command_t *cmd)
         rsp.completed_scan_lines = g_scan_completed_lines;
         break;
 
+    case USB_CMD_DEBUG_PASSTHROUGH:
+        if (!process_debug_passthrough_command(cmd, &rsp))
+        {
+            rsp.status = USB_STATUS_BAD_FRAME;
+        }
+        break;
+
     default:
         rsp.status = USB_STATUS_BAD_FRAME;
         break;
@@ -698,6 +780,7 @@ int main()
     apply_ad9826_params(&g_params);
     timing_gen_init();
     scan_dma_init();
+    pericontrol_link_init();
 
     multicore_launch_core1(usb_task_core1_main);
 

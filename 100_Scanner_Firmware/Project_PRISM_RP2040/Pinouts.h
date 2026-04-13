@@ -36,4 +36,7 @@
 #define FIFO_PKTEND_PIN     21
 #define FIFO_SLCS_PIN       22
 
+#define PERICONTROL_UART_TX_PIN 28
+#define PERICONTROL_UART_RX_PIN 29
+
 #endif

@@ -1,0 +1,75 @@
+/*
+ * Copyright (c) 2026 mr258876
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef CONTROL_PROTOCOL_H
+#define CONTROL_PROTOCOL_H
+
+#include <stdint.h>
+
+enum {
+    CONTROL_CMD_GET_PARAM_BY_HASH   = 0x20,
+    CONTROL_CMD_SET_PARAM_BY_HASH   = 0x21,
+    CONTROL_CMD_GET_STATUS          = 0x40,
+    CONTROL_CMD_SET_LED_LEVELS      = 0x41,
+    CONTROL_CMD_SET_MOTOR_ENABLE    = 0x42,
+    CONTROL_CMD_MOVE_MOTOR_STEPS    = 0x43,
+    CONTROL_CMD_STOP_MOTOR          = 0x44,
+    CONTROL_CMD_READ_TMC_REG        = 0x45,
+    CONTROL_CMD_WRITE_TMC_REG       = 0x46,
+    CONTROL_CMD_APPLY_MOTOR_CONFIG  = 0x47,
+    CONTROL_CMD_CONFIG_LED_SYNC     = 0x48
+};
+
+enum {
+    CONTROL_LED_SYNC_MODE_DISABLED = 0x00,
+    CONTROL_LED_SYNC_MODE_EXPOSURE_PULSE = 0x01
+};
+
+enum {
+    CONTROL_FRAME_IN_MARKER = 0xA6,
+    CONTROL_FRAME_OUT_MARKER = 0x6A
+};
+
+enum {
+    CONTROL_PARAM_TYPE_U8 = 1,
+    CONTROL_PARAM_TYPE_U16 = 2,
+    CONTROL_PARAM_TYPE_U32 = 3,
+    CONTROL_PARAM_TYPE_I32 = 4,
+    CONTROL_PARAM_TYPE_F32 = 5,
+    CONTROL_PARAM_TYPE_BYTES = 0x80
+};
+
+enum {
+    CONTROL_STATUS_OK = 0x00,
+    CONTROL_STATUS_QUEUE_FULL = 0xE1,
+    CONTROL_STATUS_BAD_FRAME = 0xE2,
+    CONTROL_STATUS_FLASH_FAIL = 0xE3,
+    CONTROL_STATUS_PARAM_NOT_FOUND = 0xE4,
+    CONTROL_STATUS_PARAM_TYPE_MISMATCH = 0xE7,
+    CONTROL_STATUS_PARAM_LEN_INVALID = 0xE8,
+    CONTROL_STATUS_PAYLOAD_INVALID = 0xE9,
+    CONTROL_STATUS_BUSY = 0xEA,
+    CONTROL_STATUS_RANGE_INVALID = 0xEB,
+    CONTROL_STATUS_HW_ERROR = 0xEC
+};
+
+enum {
+    CONTROL_FRAME_MAX_PAYLOAD = 58u
+};
+
+typedef struct {
+    uint8_t type;
+    uint16_t payload_len;
+    uint8_t payload[CONTROL_FRAME_MAX_PAYLOAD];
+} control_command_t;
+
+typedef struct {
+    uint8_t status;
+    uint8_t opcode;
+    uint16_t payload_len;
+    uint8_t payload[CONTROL_FRAME_MAX_PAYLOAD];
+} control_response_t;
+
+#endif

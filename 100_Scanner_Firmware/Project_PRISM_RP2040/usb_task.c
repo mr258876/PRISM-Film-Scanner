@@ -23,6 +23,17 @@
 #define USB_SCAN_STATUS_PAYLOAD_LEN 8u
 #define USB_RESPONSE_HEADER_SIZE 5u
 
+static bool is_debug_passthrough_opcode(uint8_t opcode)
+{
+    switch (opcode)
+    {
+    case USB_CMD_DEBUG_PASSTHROUGH:
+        return true;
+    default:
+        return false;
+    }
+}
+
 typedef enum {
     USB_RX_STATE_WAIT_MARKER = 0,
     USB_RX_STATE_WAIT_OPCODE,
@@ -79,6 +90,7 @@ static bool is_valid_frame_opcode(uint8_t opcode)
     case USB_CMD_SET_SCAN_LINES:
     case USB_CMD_STOP_SCAN:
     case USB_CMD_START_WARMUP:
+    case USB_CMD_DEBUG_PASSTHROUGH:
         return true;
     default:
         return false;
@@ -96,6 +108,8 @@ static bool is_valid_frame_len(uint8_t opcode, uint16_t frame_len)
     case USB_CMD_GET_PARAM_BY_HASH:
     case USB_CMD_SET_SCAN_LINES:
         return frame_len == USB_GET_PARAM_PAYLOAD_LEN;
+    case USB_CMD_DEBUG_PASSTHROUGH:
+        return frame_len >= 2u && frame_len <= (USB_DEBUG_PASSTHROUGH_MAX_SUBPAYLOAD + 2u);
     case USB_CMD_SET_PARAM_BY_HASH:
         return frame_len >= USB_SET_PARAM_FIXED_PAYLOAD_LEN &&
                frame_len <= (uint16_t)(USB_SET_PARAM_FIXED_PAYLOAD_LEN + USB_PARAM_MAX_DATA_LEN);
@@ -166,6 +180,11 @@ static void try_queue_payload_command(uint8_t *frame_opcode,
         cmd.scan_lines = decode_u32_le(frame_payload);
         break;
     default:
+        if (is_debug_passthrough_opcode(*frame_opcode))
+        {
+            cmd.debug_payload_len = *frame_len;
+            memcpy(cmd.debug_payload, frame_payload, *frame_len);
+        }
         break;
     }
 
@@ -322,6 +341,15 @@ void usb_task_core1_main(void)
                 encode_u32_le(payload, rsp.target_scan_lines);
                 encode_u32_le(&payload[USB_GET_PARAM_PAYLOAD_LEN], rsp.completed_scan_lines);
                 payload_len = USB_SCAN_STATUS_PAYLOAD_LEN;
+            }
+            else if (is_debug_passthrough_opcode(rsp.opcode))
+            {
+                if (rsp.debug_payload_len > USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD)
+                {
+                    continue;
+                }
+                memcpy(payload, rsp.debug_payload, rsp.debug_payload_len);
+                payload_len = rsp.debug_payload_len;
             }
 
             uint8_t header[USB_RESPONSE_HEADER_SIZE] = {USB_FRAME_OUT_MARKER, rsp.opcode, rsp.status, 0, 0};

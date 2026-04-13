@@ -37,6 +37,7 @@ pico_sdk_init()
 
 add_executable(Project_PRISM_RP2040
         Project_PRISM_RP2040.c
+        pericontrol_link.c
         usb_task.c
         usb_descriptors.c
         persistent_params.c
@@ -77,6 +78,7 @@ add_subdirectory(AD9826_SPI)
 target_link_libraries(Project_PRISM_RP2040 
         hardware_pio
         hardware_dma
+        hardware_uart
         AD9826_SPI
         )
 

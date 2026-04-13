@@ -35,6 +35,15 @@ Device-to-host response frame:
 - The firmware currently accepts payloads up to `32` bytes for parameter writes.
 - Invalid markers, unsupported opcodes, or unexpected payload sizes return an error status.
 
+## Transport Topology
+
+The Scanner Main Control Board is the only PC-facing control endpoint.
+
+- **PC -> Scanner Main Control Board**: USB vendor interface, frame markers `A5/5A`
+- **Scanner Main Control Board -> Peripheral Control Board**: UART0 bridge on GPIO28/GPIO29, frame markers `A6/6A`, CRC-16 on each internal frame
+
+The host should talk only to the Scanner Main Control Board. Peripheral-board details are intentionally kept off the stable USB API surface, except for the dedicated debug passthrough command documented below.
+
 ## Commands
 
 ### `0x20` - Get Parameter By Hash
@@ -126,6 +135,37 @@ Response payload:
 +----------------------+-------------------------+
 ```
 
+## Debug / Service Commands
+
+The stable PC-facing API stops at the Scanner Main Control Board boundary. Raw subordinate-board access is available only through the debug passthrough command below.
+
+### `0xF0` - Debug Passthrough To Board-102
+
+Request payload:
+
+```text
++-------------+----------------------+------------------------+
+| target (u8) | subordinate_opcode   | subordinate_payload... |
+|             | (u8)                 |                        |
++-------------+----------------------+------------------------+
+```
+
+- `target = 0x01` selects the Peripheral Control Board.
+- The subordinate payload length is inferred from the outer USB frame length minus 2 bytes.
+- This command is for bring-up, service, and low-level diagnostics. It is not part of the stable production host API.
+- The current implementation limits subordinate payloads carried through this command to `56` bytes so the USB response still fits in one control frame.
+
+Successful response payload:
+
+```text
++-------------+----------------------+---------------------+------------------------+
+| target (u8) | subordinate_opcode   | subordinate_status  | subordinate_payload... |
+|             | (u8)                 | (u8)                |                        |
++-------------+----------------------+---------------------+------------------------+
+```
+
+The Scanner Main Control Board terminates the internal UART link layer itself. The host does not see the subordinate CRC directly.
+
 ## Status Codes
 
 - `0x00` - `OK`
@@ -138,6 +178,11 @@ Response payload:
 - `0xE7` - `PARAM_TYPE_MISMATCH`
 - `0xE8` - `PARAM_LEN_INVALID`
 - `0xE9` - `PAYLOAD_INVALID`
+- `0xEA` - `DEBUG_TARGET_UNSUPPORTED`
+- `0xEB` - `SUBORDINATE_TIMEOUT`
+- `0xEC` - `SUBORDINATE_LINK_ERROR`
+
+For `0xF0`, the USB status byte remains owned by the Scanner Main Control Board. On success it returns `OK` and carries the subordinate status inside the response payload. Internal UART CRC and framing errors are absorbed by board 100 and surfaced only as coarse board-100-level link failures.
 
 ## Parameter Types
 
@@ -177,4 +222,5 @@ The firmware hashes parameter keys internally with 32-bit FNV-1a. A host applica
 - Parameter values are encoded little-endian.
 - `Set Parameter By Hash` must send a `param_type` and `param_len` that exactly match the firmware metadata.
 - Scan-control responses always return the configured target line count together with the completed line count, which is useful for host-side progress tracking.
+- Low-level Peripheral Control Board access is intentionally isolated behind the debug passthrough command. Normal host workflows should not depend on subordinate opcodes, payloads, or link-layer details.
 - This protocol description reflects the current in-repo firmware and may change while the project is under active development.

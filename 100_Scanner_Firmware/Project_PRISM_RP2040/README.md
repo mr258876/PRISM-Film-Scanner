@@ -10,6 +10,15 @@ Instead of writing only a basic build guide, this README also records how the fi
 2. Install `Raspberry Pi Pico` extension
 3. Click the `Pi Pico` icon, then `Run Project (USB)`, and you're good to go!
 
+## Control Topology
+
+In the current architecture, this RP2040 firmware is the Scanner Main Control Board's PC-facing control endpoint.
+
+- **PC -> Scanner Main Control Board**: USB vendor interface (`A5/5A` framed protocol)
+- **Scanner Main Control Board -> Peripheral Control Board**: UART0 on GPIO28/GPIO29 (`A6/6A` framed subordinate protocol)
+
+That means the Scanner Main Control Board owns the stable host-facing USB API. Peripheral-board details stay behind the board-to-board UART link, with only a dedicated debug passthrough command available when raw subordinate access is needed.
+
 ## Introduction
 
 Existing open-source high-performance CCD camera projects usually use FPGAs to generate clock signals for the CCD and A/D converters ([CameraNexus/Sitna1](https://github.com/CameraNexus/sitina1), 2025; [BellssGit/ICX453_CCD_Mirrorless_Camera](https://github.com/BellssGit/ICX453_CCD_Mirrorless_Camera), 2025). The benefits are clear: many available GPIOs, precise timing control, and fast custom logic such as the intensity histograms demonstrated in those projects. However, FPGAs also have several noticeable weaknesses: price, power consumption, and development difficulty.

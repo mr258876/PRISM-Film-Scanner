@@ -17,7 +17,12 @@ enum {
     USB_CMD_START_SCAN = 0x30,
     USB_CMD_SET_SCAN_LINES = 0x31,
     USB_CMD_STOP_SCAN = 0x32,
-    USB_CMD_START_WARMUP = 0x33
+    USB_CMD_START_WARMUP = 0x33,
+    USB_CMD_DEBUG_PASSTHROUGH = 0xF0
+};
+
+enum {
+    USB_DEBUG_TARGET_BOARD102 = 0x01
 };
 
 enum {
@@ -35,7 +40,9 @@ enum {
 };
 
 enum {
-    USB_PARAM_MAX_DATA_LEN = 32
+    USB_PARAM_MAX_DATA_LEN = 32,
+    USB_DEBUG_PASSTHROUGH_MAX_SUBPAYLOAD = 56,
+    USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD = 59
 };
 
 enum {
@@ -48,7 +55,10 @@ enum {
     USB_STATUS_BUSY = 0xE6,
     USB_STATUS_PARAM_TYPE_MISMATCH = 0xE7,
     USB_STATUS_PARAM_LEN_INVALID = 0xE8,
-    USB_STATUS_PAYLOAD_INVALID = 0xE9
+    USB_STATUS_PAYLOAD_INVALID = 0xE9,
+    USB_STATUS_DEBUG_TARGET_UNSUPPORTED = 0xEA,
+    USB_STATUS_SUBORDINATE_TIMEOUT = 0xEB,
+    USB_STATUS_SUBORDINATE_LINK_ERROR = 0xEC
 };
 
 typedef struct {
@@ -58,6 +68,8 @@ typedef struct {
     uint8_t param_len;
     uint8_t param_data[USB_PARAM_MAX_DATA_LEN];
     uint32_t scan_lines;
+    uint16_t debug_payload_len;
+    uint8_t debug_payload[USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD];
     prism_params_t params;
 } usb_command_t;
 
@@ -70,6 +82,8 @@ typedef struct {
     uint8_t param_data[USB_PARAM_MAX_DATA_LEN];
     uint32_t target_scan_lines;
     uint32_t completed_scan_lines;
+    uint16_t debug_payload_len;
+    uint8_t debug_payload[USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD];
     prism_params_t params;
 } usb_response_t;
 

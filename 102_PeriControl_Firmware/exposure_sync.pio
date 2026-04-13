@@ -1,0 +1,21 @@
+;
+; Copyright (c) 2026 mr258876
+;
+; SPDX-License-Identifier: MIT
+;
+
+.program exposure_sync_pulse
+pull block
+mov y, osr
+.wrap_target
+wait_sync_high:
+    wait 1 pin 0
+wait_sync_fall:
+    wait 0 pin 0
+    set pins, 1
+    mov x, y
+pulse_loop:
+    jmp x-- pulse_loop
+    set pins, 0
+    jmp wait_sync_high
+.wrap
