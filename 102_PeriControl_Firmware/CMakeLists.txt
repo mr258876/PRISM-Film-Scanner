@@ -68,6 +68,7 @@ target_link_libraries(Project_PRISM_PeriControl
         pico_flash
         hardware_flash
         hardware_pio
+        hardware_pwm
         hardware_uart
         hardware_gpio
         hardware_clocks)

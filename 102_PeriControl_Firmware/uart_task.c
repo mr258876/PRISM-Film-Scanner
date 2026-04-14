@@ -76,14 +76,18 @@ static bool is_valid_frame_opcode(uint8_t opcode)
         case CONTROL_CMD_GET_PARAM_BY_HASH:
         case CONTROL_CMD_SET_PARAM_BY_HASH:
         case CONTROL_CMD_GET_STATUS:
+        case CONTROL_CMD_GET_ILLUMINATION_STATUS:
         case CONTROL_CMD_SET_LED_LEVELS:
+        case CONTROL_CMD_SET_STEADY_ILLUMINATION:
+        case CONTROL_CMD_CONFIG_LED_SYNC:
+        case CONTROL_CMD_SET_SYNC_PULSE_CLK:
+        case CONTROL_CMD_GET_MOTION_STATUS:
         case CONTROL_CMD_SET_MOTOR_ENABLE:
         case CONTROL_CMD_MOVE_MOTOR_STEPS:
         case CONTROL_CMD_STOP_MOTOR:
+        case CONTROL_CMD_APPLY_MOTOR_CONFIG:
         case CONTROL_CMD_READ_TMC_REG:
         case CONTROL_CMD_WRITE_TMC_REG:
-        case CONTROL_CMD_APPLY_MOTOR_CONFIG:
-        case CONTROL_CMD_CONFIG_LED_SYNC:
             return true;
         default:
             return false;
@@ -99,6 +103,16 @@ static void reset_rx_frame(void)
     g_frame_len_pos = 0;
     g_frame_crc_pos = 0;
     g_last_rx_byte_us = 0;
+}
+
+static void send_protocol_error_response(uint8_t opcode, uint8_t status)
+{
+    control_response_t rsp = {
+        .status = status,
+        .opcode = opcode,
+        .payload_len = 0u,
+    };
+    uart_task_send_blocking(&rsp);
 }
 
 void uart_task_init(void)
@@ -139,6 +153,7 @@ bool uart_task_try_recv(control_command_t *cmd)
             case UART_RX_STATE_WAIT_OPCODE:
                 g_frame_opcode = byte;
                 if (!is_valid_frame_opcode(g_frame_opcode)) {
+                    send_protocol_error_response(g_frame_opcode, CONTROL_STATUS_BAD_FRAME);
                     reset_rx_frame();
                     break;
                 }
@@ -153,6 +168,7 @@ bool uart_task_try_recv(control_command_t *cmd)
 
                 g_frame_len = decode_u16_le(g_frame_len_bytes);
                 if (g_frame_len > CONTROL_FRAME_MAX_PAYLOAD) {
+                    send_protocol_error_response(g_frame_opcode, CONTROL_STATUS_BAD_FRAME);
                     reset_rx_frame();
                     break;
                 }
@@ -189,6 +205,7 @@ bool uart_task_try_recv(control_command_t *cmd)
                 }
 
                 if (decode_u16_le(g_frame_crc_bytes) != expected_crc) {
+                    send_protocol_error_response(g_frame_opcode, CONTROL_STATUS_BAD_FRAME);
                     reset_rx_frame();
                     break;
                 }

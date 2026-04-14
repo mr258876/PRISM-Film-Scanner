@@ -46,6 +46,12 @@ The host should talk only to the Scanner Main Control Board. Peripheral-board de
 
 ## Commands
 
+For command semantics in this document:
+
+- The USB `status` byte indicates whether the board100-side transaction completed successfully.
+- For setter-style commands, a successful response payload represents the value that is now stored or in effect after validation / normalization, not merely a blind echo of the request bytes.
+- If a host needs an explicit post-write confirmation of current subordinate state, it should call the corresponding `Get State` command after a successful setter response.
+
 ### `0x20` - Get Parameter By Hash
 
 Request payload:
@@ -135,6 +141,184 @@ Response payload:
 +----------------------+-------------------------+
 ```
 
+## Illumination Commands
+
+These commands are part of the formal Scanner Main Control Board API. They describe scanner illumination behavior rather than raw board-102 opcodes.
+
+### `0x40` - Get Illumination State
+
+- Request payload length: `0`
+- Response payload:
+
+```text
++--------+--------+--------+--------+
+| led1   | led2   | led3   | led4   |
+| (u16)  | (u16)  | (u16)  | (u16)  |
++--------+--------+--------+--------+
+| steady_mask (u8) | sync_mask (u8)   | sync_active(u8)  | reserved(u8) |
++------------------+------------------+------------------+--------------+
+| led1_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+| led2_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+| led3_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+| led4_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+```
+
+`led1..led4` are the configured steady-mode brightness levels. `steady_mask` describes which channels are currently driven continuously with those levels. `sync_mask` describes which channels are armed for `EXPOSURE_SYNC`-triggered pulses. This allows channels to remain steady-off while still participating in sync mode.
+
+### `0x41` - Set Illumination Levels
+
+Request payload:
+
+```text
++--------+--------+--------+--------+
+| led1   | led2   | led3   | led4   |
+| (u16)  | (u16)  | (u16)  | (u16)  |
++--------+--------+--------+--------+
+```
+
+Response payload echoes the stored 8-byte payload.
+
+These are the configured brightness levels used when a channel is steady-on, and also the brightness basis used during sync pulses.
+
+- The returned payload reflects the currently stored illumination levels after any hardware-side normalization.
+
+### `0x42` - Set Steady Illumination
+
+Request payload:
+
+```text
++------------------+--------------+
+| steady_mask (u8) | reserved(u24)|
++------------------+--------------+
+```
+
+Response payload echoes the stored 4-byte payload.
+
+- `steady_mask` only accepts LED1..LED4 bits (`bit0..bit3`).
+- Reserved bytes must be zero.
+- A steady-on channel cannot also be sync-armed at the same time.
+
+### `0x43` - Configure Exposure Lighting
+
+Request payload:
+
+```text
++----------------+--------------+
+| sync_mask(u8)  | reserved(u24)|
++----------------+--------------+
+```
+
+- `sync_mask` uses bit0..bit3 for LED1..LED4.
+- `sync_mask = 0` disables sync participation for all channels.
+- Sync-armed channels pulse using their configured `ledN` brightness level from `0x41`.
+
+Response payload echoes the stored 4-byte payload.
+
+- `sync_mask` only accepts LED1..LED4 bits (`bit0..bit3`).
+- Reserved bytes must be zero.
+- Sync-armed channels must not overlap with channels currently configured for steady illumination.
+- Sync-armed channels must already have a pulse clock of at least `2` configured.
+
+### `0x44` - Set Sync Pulse Clocks
+
+Request payload:
+
+```text
++-----------------------+-----------------------+
+| led1_pulse_clk (u32)  | led2_pulse_clk (u32)  |
++-----------------------+-----------------------+
+| led3_pulse_clk (u32)  | led4_pulse_clk (u32)  |
++-----------------------+-----------------------+
+```
+
+`pulse_clk` is expressed directly in board-102 PIO clock cycles. Sync-enabled channels require a pulse clock value of at least `2`.
+
+Response payload echoes the stored 16-byte payload.
+
+- If a channel is currently sync-armed, its requested pulse clock must be at least `2`.
+
+## Motion Commands
+
+These commands are also part of the formal Scanner Main Control Board API. They describe motion behavior without exposing raw board-102 command names.
+
+### `0x50` - Get Motion State
+
+- Request payload length: `0`
+- Response payload:
+
+```text
++---------------------------------------------------------------+
+| for each motor: motor_id(u8), enabled(u8), running(u8),       |
+| direction(u8), diag(u8), reserved(u8), interval_us(u16),      |
+| remaining_steps(u32)                                           |
++---------------------------------------------------------------+
+```
+
+### `0x51` - Set Motion Enable
+
+Request payload:
+
+```text
++---------------+---------------+
+| motor_id (u8) | enabled (u8)  |
++---------------+---------------+
+```
+
+Response payload echoes the normalized 2-byte payload.
+
+- `motor_id` must reference an implemented motion channel.
+- `enabled` must be either `0` or `1`.
+
+### `0x52` - Move Relative Steps
+
+Request payload:
+
+```text
++---------------+----------------+-------------+------------------+
+| motor_id (u8) | direction (u8) | steps (u32) | interval_us (u32)|
++---------------+----------------+-------------+------------------+
+```
+
+Response payload echoes the normalized 10-byte payload.
+
+- `motor_id` must reference an implemented motion channel.
+- `direction` must be either `0` or `1`.
+- `steps` must be non-zero.
+- `interval_us` must be at least `10`.
+- The addressed motor must already be enabled before a move request is accepted.
+
+### `0x53` - Stop Motion
+
+Request payload:
+
+```text
++---------------+
+| motor_id (u8) |
++---------------+
+```
+
+Response payload echoes the normalized 1-byte payload.
+
+- `motor_id` must reference an implemented motion channel.
+
+### `0x54` - Apply Motion Config
+
+Request payload:
+
+```text
++---------------+
+| motor_id (u8) |
++---------------+
+```
+
+Response payload echoes the normalized 1-byte payload.
+
+- `motor_id` must reference an implemented motion channel.
+
 ## Debug / Service Commands
 
 The stable PC-facing API stops at the Scanner Main Control Board boundary. Raw subordinate-board access is available only through the debug passthrough command below.
@@ -166,6 +350,14 @@ Successful response payload:
 
 The Scanner Main Control Board terminates the internal UART link layer itself. The host does not see the subordinate CRC directly.
 
+Current board-102 subordinate command domains behind this passthrough are:
+
+- `0x20..0x2F`: service / parameter access
+- `0x40..0x4F`: illumination domain
+- `0x50..0x5F`: motion domain
+
+This subordinate map is intentionally internal and may change faster than the stable board-100 USB API.
+
 ## Status Codes
 
 - `0x00` - `OK`
@@ -181,6 +373,8 @@ The Scanner Main Control Board terminates the internal UART link layer itself. T
 - `0xEA` - `DEBUG_TARGET_UNSUPPORTED`
 - `0xEB` - `SUBORDINATE_TIMEOUT`
 - `0xEC` - `SUBORDINATE_LINK_ERROR`
+- `0xED` - `RANGE_INVALID`
+- `0xEE` - `HW_ERROR`
 
 For `0xF0`, the USB status byte remains owned by the Scanner Main Control Board. On success it returns `OK` and carries the subordinate status inside the response payload. Internal UART CRC and framing errors are absorbed by board 100 and surfaced only as coarse board-100-level link failures.
 

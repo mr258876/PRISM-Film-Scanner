@@ -65,7 +65,7 @@ Request payload:
 
 Response payload echoes the stored value using the same layout.
 
-### `0x40` Get Status
+### `0x22` Get Status (Legacy / Service)
 
 Response payload:
 
@@ -77,62 +77,134 @@ Response payload:
 | direction(u8), diag(u8), reserved(u8), interval_us(u16),      |
 | remaining_steps(u32)                                           |
 +---------------------------------------------------------------+
-| led_sync_mode(u8) | led_sync_active(u8) | led_sync_mask(u8)   |
+| steady_mask(u8) | sync_mask(u8) | sync_active(u8)       |
 +---------------------------------------------------------------+
-| reserved(u8) | led_sync_pulse_us(u32)                         |
+| reserved(u8) | legacy_sync_pulse_us(u32)                      |
 +---------------------------------------------------------------+
+```
+
+The shared legacy status response keeps a single-pulse slot only to preserve its fixed payload size. New integrations should prefer the dedicated illumination and motion domain getters below.
+
+## Illumination Domain
+
+### `0x40` Get Illumination Status
+
+Response payload:
+
+```text
++--------+--------+--------+--------+
+| led1   | led2   | led3   | led4   |
+| (u16)  | (u16)  | (u16)  | (u16)  |
++--------+--------+--------+--------+
+| steady_mask (u8) | sync_mask (u8)   | sync_active(u8)  | reserved(u8) |
++------------------+------------------+------------------+--------------+
+| led1_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+| led2_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+| led3_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
+| led4_pulse_clk (u32)                                                 |
++-----------------------------------------------------------------------+
 ```
 
 ### `0x41` Set LED Levels
 
 Request payload: `led1(u16), led2(u16), led3(u16), led4(u16)`
 
-### `0x42` Set Motor Enable
+These are the configured brightness levels used when a channel is steady-on, and also the brightness basis used during sync pulses.
+
+### `0x42` Set Steady Illumination
+
+Request payload:
+
+```text
++------------------+--------------+
+| steady_mask (u8) | reserved(u24)|
++------------------+--------------+
+```
+
+- `steady_mask` uses bit0..bit3 for LED1..LED4.
+- Channels in `steady_mask` are held continuously on.
+- Channels not in `steady_mask` remain off unless separately armed for sync mode.
+
+Response payload echoes the same 4-byte payload.
+
+### `0x43` Configure LED Exposure Sync
+
+Request payload:
+
+```text
++----------------+--------------+
+| sync_mask(u8)  | reserved(u24)|
++----------------+--------------+
+```
+
+- `sync_mask` uses bit0..bit3 for LED1..LED4.
+- `sync_mask = 0` disables sync participation for all channels.
+- Sync-armed channels pulse using their configured `ledN` brightness level from `0x41`.
+
+Channels cannot currently be both steady-on and sync-armed at the same time; overlapping bits are rejected as invalid.
+
+Response payload echoes the same 4-byte payload.
+
+### `0x44` Set Sync Pulse Clocks
+
+Request payload:
+
+```text
++------------------------+------------------------+
+| led1_pulse_clk (u32)   | led2_pulse_clk (u32)   |
++------------------------+------------------------+
+| led3_pulse_clk (u32)   | led4_pulse_clk (u32)   |
++------------------------+------------------------+
+```
+
+`pulse_clk` is expressed directly in board-102 PIO clock cycles. Sync-enabled channels require a non-zero pulse clock value.
+
+Response payload echoes the same 16-byte payload.
+
+## Motion Domain
+
+### `0x50` Get Motion State
+
+Response payload:
+
+```text
++---------------------------------------------------------------+
+| for each motor: motor_id(u8), enabled(u8), running(u8),       |
+| direction(u8), diag(u8), reserved(u8), interval_us(u16),      |
+| remaining_steps(u32)                                           |
++---------------------------------------------------------------+
+```
+
+### `0x51` Set Motor Enable
 
 Request payload: `motor_id(u8), enabled(u8)`
 
-### `0x43` Move Motor Steps
+### `0x52` Move Motor Steps
 
 Request payload: `motor_id(u8), direction(u8), steps(u32), interval_us(u32)`
 
-### `0x44` Stop Motor
+### `0x53` Stop Motor
 
 Request payload: `motor_id(u8)`
 
-### `0x45` Read TMC Register
-
-Request payload: `motor_id(u8), reg_addr(u8)`
-
-Response payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
-
-### `0x46` Write TMC Register
-
-Request payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
-
-### `0x47` Apply Motor Config
+### `0x54` Apply Motor Config
 
 Request payload: `motor_id(u8)`
 
 This applies the persisted motor parameters to the selected TMC2209.
 
-### `0x48` Configure LED Exposure Sync
+### `0x55` Read TMC Register
 
-Request payload:
+Request payload: `motor_id(u8), reg_addr(u8)`
 
-```text
-+----------------+--------------+----------------+-------------------+
-| sync_mode (u8) | led_mask(u8) | reserved (u16) | pulse_us (u32)    |
-+----------------+--------------+----------------+-------------------+
-```
+Response payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
 
-- `sync_mode = 0`: disable exposure-sync gating and restore steady board-102 LED output.
-- `sync_mode = 1`: on each falling edge of `EXPOSURE_SYNC`, board 102 uses PIO to drive the selected LEDs on locally for `pulse_us` microseconds and then drives them back off.
-- `led_mask` uses bit0..bit3 for LED1..LED4.
-- `pulse_us` should already include any timing compensation agreed by board 100 for PT4115 DIM response, optical settling, or other downstream delay.
+### `0x56` Write TMC Register
 
-In the current PIO-oriented implementation, LED level values are treated as binary enable flags for the LED channels: `0` means off and any non-zero value means on.
-
-Response payload echoes the same 8-byte payload.
+Request payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
 
 ## Status Codes
 

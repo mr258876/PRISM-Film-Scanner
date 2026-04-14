@@ -32,6 +32,16 @@
 #define PRISM_MIN_SYS_CLOCK_KHZ 30000u
 #define PRISM_MAX_SYS_CLOCK_KHZ 200000u
 #define PRISM_PARAMS_SAVE_DEBOUNCE_MS 1000u
+#define BOARD102_LED_CHANNEL_COUNT 4u
+#define BOARD102_VALID_LED_MASK ((1u << BOARD102_LED_CHANNEL_COUNT) - 1u)
+#define BOARD102_MOTOR_COUNT 3u
+#define BOARD102_MIN_STEP_INTERVAL_US 10u
+#define BOARD102_MIN_SYNC_PULSE_CLK 2u
+#define BOARD102_STATUS_MOTION_OFFSET 12u
+#define BOARD102_STATUS_MOTOR_ENTRY_LEN 12u
+#define BOARD102_STATUS_MOTOR_COUNT BOARD102_MOTOR_COUNT
+#define BOARD102_STATUS_MOTION_LEN (BOARD102_STATUS_MOTOR_ENTRY_LEN * BOARD102_STATUS_MOTOR_COUNT)
+#define BOARD102_ILLUMINATION_STATUS_LEN 28u
 
 static prism_params_t g_params;
 static bool g_params_dirty = false;
@@ -108,6 +118,445 @@ static uint8_t map_pericontrol_link_result_to_usb_status(pericontrol_link_result
     default:
         return USB_STATUS_BAD_FRAME;
     }
+}
+
+static uint8_t map_pericontrol_status_to_usb_status(uint8_t pericontrol_status)
+{
+    switch (pericontrol_status)
+    {
+    case 0x00:
+        return USB_STATUS_OK;
+    case 0xE6:
+    case 0xEA:
+        return USB_STATUS_BUSY;
+    case 0xE8:
+    case 0xE9:
+        return USB_STATUS_PAYLOAD_INVALID;
+    case 0xEB:
+        return USB_STATUS_RANGE_INVALID;
+    case 0xEC:
+        return USB_STATUS_HW_ERROR;
+    default:
+        return USB_STATUS_BAD_FRAME;
+    }
+}
+
+static bool pericontrol_command_roundtrip(uint8_t pericontrol_opcode,
+                                          const uint8_t *tx_payload,
+                                          uint16_t tx_payload_len,
+                                          usb_response_t *rsp,
+                                          uint8_t *rx_payload,
+                                          uint16_t *rx_payload_len)
+{
+    uint8_t pericontrol_status = 0u;
+    pericontrol_link_result_t link_result = pericontrol_link_transceive(pericontrol_opcode,
+                                                                        tx_payload,
+                                                                        tx_payload_len,
+                                                                        &pericontrol_status,
+                                                                        rx_payload_len,
+                                                                        rx_payload,
+                                                                        PERICONTROL_MAX_PAYLOAD);
+    if (link_result != PERICONTROL_LINK_OK)
+    {
+        rsp->status = map_pericontrol_link_result_to_usb_status(link_result);
+        return false;
+    }
+
+    rsp->status = map_pericontrol_status_to_usb_status(pericontrol_status);
+    return rsp->status == USB_STATUS_OK;
+}
+
+static bool fetch_board102_illumination_state(usb_response_t *rsp,
+                                              uint8_t *status_out,
+                                              uint16_t *status_len_out)
+{
+    return pericontrol_command_roundtrip(PERICONTROL_CMD_GET_ILLUMINATION_STATUS,
+                                         NULL,
+                                         0u,
+                                         rsp,
+                                         status_out,
+                                         status_len_out);
+}
+
+static bool fetch_board102_motion_state(usb_response_t *rsp,
+                                        uint8_t *status_out,
+                                        uint16_t *status_len_out)
+{
+    return pericontrol_command_roundtrip(PERICONTROL_CMD_GET_MOTION_STATUS,
+                                         NULL,
+                                         0u,
+                                         rsp,
+                                         status_out,
+                                         status_len_out);
+}
+
+static bool validate_led_mask_payload(const uint8_t *payload,
+                                      uint8_t *mask_out,
+                                      usb_response_t *rsp)
+{
+    if (payload[1] != 0u || payload[2] != 0u || payload[3] != 0u)
+    {
+        rsp->status = USB_STATUS_PAYLOAD_INVALID;
+        return false;
+    }
+
+    uint8_t mask = payload[0];
+    if ((mask & (uint8_t)(~BOARD102_VALID_LED_MASK)) != 0u)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return false;
+    }
+
+    *mask_out = mask;
+    return true;
+}
+
+static uint32_t decode_u32_le_local(const uint8_t *in)
+{
+    return ((uint32_t)in[0]) |
+           ((uint32_t)in[1] << 8) |
+           ((uint32_t)in[2] << 16) |
+           ((uint32_t)in[3] << 24);
+}
+
+static bool fetch_motion_entry(usb_response_t *rsp,
+                               uint8_t motor_id,
+                               uint8_t *entry_out)
+{
+    uint8_t motion_state[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t motion_state_len = 0u;
+    if (!fetch_board102_motion_state(rsp, motion_state, &motion_state_len))
+    {
+        return false;
+    }
+
+    if (motion_state_len != BOARD102_STATUS_MOTION_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return false;
+    }
+
+    memcpy(entry_out,
+           &motion_state[motor_id * BOARD102_STATUS_MOTOR_ENTRY_LEN],
+           BOARD102_STATUS_MOTOR_ENTRY_LEN);
+    return true;
+}
+
+static bool process_illumination_get_state(usb_response_t *rsp)
+{
+    uint8_t board102_status[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t board102_status_len = 0u;
+    if (!fetch_board102_illumination_state(rsp,
+                                           board102_status,
+                                           &board102_status_len))
+    {
+        return true;
+    }
+
+    if (board102_status_len != BOARD102_ILLUMINATION_STATUS_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    rsp->debug_payload_len = BOARD102_ILLUMINATION_STATUS_LEN;
+    memcpy(rsp->debug_payload, board102_status, BOARD102_ILLUMINATION_STATUS_LEN);
+    return true;
+}
+
+static bool process_illumination_set_levels_payload(const usb_command_t *cmd, usb_response_t *rsp, const uint8_t *payload)
+{
+    uint8_t rx_payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t rx_payload_len = 0u;
+    if (!pericontrol_command_roundtrip(PERICONTROL_CMD_SET_LED_LEVELS,
+                                       payload,
+                                       8u,
+                                       rsp,
+                                       rx_payload,
+                                       &rx_payload_len))
+    {
+        return true;
+    }
+    if (rx_payload_len != 8u) {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    uint8_t illumination_state[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t illumination_state_len = 0u;
+    if (!fetch_board102_illumination_state(rsp, illumination_state, &illumination_state_len))
+    {
+        return true;
+    }
+    if (illumination_state_len != BOARD102_ILLUMINATION_STATUS_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    memcpy(rsp->debug_payload, illumination_state, 8u);
+    rsp->debug_payload_len = 8u;
+    return true;
+}
+
+static bool process_illumination_set_steady(const uint8_t *payload, usb_response_t *rsp)
+{
+    uint8_t steady_mask = 0u;
+    if (!validate_led_mask_payload(payload, &steady_mask, rsp))
+    {
+        return true;
+    }
+
+    uint8_t illumination_state[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t illumination_state_len = 0u;
+    if (!fetch_board102_illumination_state(rsp, illumination_state, &illumination_state_len))
+    {
+        return true;
+    }
+    if (illumination_state_len != BOARD102_ILLUMINATION_STATUS_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    if ((steady_mask & illumination_state[9]) != 0u)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return true;
+    }
+
+    uint8_t normalized_payload[4] = {steady_mask, 0u, 0u, 0u};
+    uint8_t rx_payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t rx_payload_len = 0u;
+    if (!pericontrol_command_roundtrip(PERICONTROL_CMD_SET_STEADY_ILLUMINATION,
+                                       normalized_payload,
+                                       4u,
+                                       rsp,
+                                       rx_payload,
+                                       &rx_payload_len))
+    {
+        return true;
+    }
+    if (rx_payload_len != 4u) {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+    memcpy(rsp->debug_payload, normalized_payload, 4u);
+    rsp->debug_payload_len = 4u;
+    return true;
+}
+
+static bool process_illumination_config_sync(const uint8_t *payload, usb_response_t *rsp)
+{
+    uint8_t sync_mask = 0u;
+    if (!validate_led_mask_payload(payload, &sync_mask, rsp))
+    {
+        return true;
+    }
+
+    uint8_t illumination_state[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t illumination_state_len = 0u;
+    if (!fetch_board102_illumination_state(rsp, illumination_state, &illumination_state_len))
+    {
+        return true;
+    }
+    if (illumination_state_len != BOARD102_ILLUMINATION_STATUS_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    if ((sync_mask & illumination_state[8]) != 0u)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return true;
+    }
+
+    for (uint32_t i = 0; i < BOARD102_LED_CHANNEL_COUNT; i++)
+    {
+        uint32_t pulse_clk = decode_u32_le_local(&illumination_state[12u + (i * 4u)]);
+        if (((sync_mask >> i) & 0x01u) != 0u && pulse_clk < BOARD102_MIN_SYNC_PULSE_CLK)
+        {
+            rsp->status = USB_STATUS_RANGE_INVALID;
+            return true;
+        }
+    }
+
+    uint8_t normalized_payload[4] = {sync_mask, 0u, 0u, 0u};
+    uint8_t rx_payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t rx_payload_len = 0u;
+    if (!pericontrol_command_roundtrip(PERICONTROL_CMD_CONFIG_LED_SYNC,
+                                       normalized_payload,
+                                       4u,
+                                       rsp,
+                                       rx_payload,
+                                       &rx_payload_len))
+    {
+        return true;
+    }
+    if (rx_payload_len != 4u) {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+    memcpy(rsp->debug_payload, normalized_payload, 4u);
+    rsp->debug_payload_len = 4u;
+    return true;
+}
+
+static bool process_illumination_set_sync_pulse(const uint8_t *payload, usb_response_t *rsp)
+{
+    uint8_t illumination_state[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t illumination_state_len = 0u;
+    if (!fetch_board102_illumination_state(rsp, illumination_state, &illumination_state_len))
+    {
+        return true;
+    }
+    if (illumination_state_len != BOARD102_ILLUMINATION_STATUS_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    uint8_t sync_mask = illumination_state[9];
+    for (uint32_t i = 0; i < BOARD102_LED_CHANNEL_COUNT; i++)
+    {
+        uint32_t pulse_clk = decode_u32_le_local(&payload[i * 4u]);
+        if (((sync_mask >> i) & 0x01u) != 0u && pulse_clk < BOARD102_MIN_SYNC_PULSE_CLK)
+        {
+            rsp->status = USB_STATUS_RANGE_INVALID;
+            return true;
+        }
+    }
+
+    uint8_t rx_payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t rx_payload_len = 0u;
+    if (!pericontrol_command_roundtrip(PERICONTROL_CMD_SET_SYNC_PULSE_CLK,
+                                       payload,
+                                       16u,
+                                       rsp,
+                                       rx_payload,
+                                       &rx_payload_len))
+    {
+        return true;
+    }
+    if (rx_payload_len != 16u) {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+    memcpy(rsp->debug_payload, rx_payload, 16u);
+    rsp->debug_payload_len = 16u;
+    return true;
+}
+
+static bool process_motion_get_state(usb_response_t *rsp)
+{
+    uint8_t board102_status[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t board102_status_len = 0u;
+    if (!fetch_board102_motion_state(rsp,
+                                     board102_status,
+                                     &board102_status_len))
+    {
+        return true;
+    }
+    if (board102_status_len != BOARD102_STATUS_MOTION_LEN)
+    {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+
+    memcpy(rsp->debug_payload, board102_status, BOARD102_STATUS_MOTION_LEN);
+    rsp->debug_payload_len = BOARD102_STATUS_MOTION_LEN;
+    return true;
+}
+
+static bool process_motion_passthrough(uint8_t pericontrol_opcode,
+                                       const uint8_t *payload,
+                                       uint16_t payload_len,
+                                       uint16_t expected_rx_payload_len,
+                                       usb_response_t *rsp)
+{
+    uint8_t rx_payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    uint16_t rx_payload_len = 0u;
+    if (!pericontrol_command_roundtrip(pericontrol_opcode,
+                                       payload,
+                                       payload_len,
+                                       rsp,
+                                       rx_payload,
+                                       &rx_payload_len))
+    {
+        return true;
+    }
+
+    if (rx_payload_len != expected_rx_payload_len ||
+        rx_payload_len > USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD) {
+        rsp->status = USB_STATUS_SUBORDINATE_LINK_ERROR;
+        return true;
+    }
+    memcpy(rsp->debug_payload, rx_payload, rx_payload_len);
+    rsp->debug_payload_len = rx_payload_len;
+    return true;
+}
+
+static bool validate_motion_enable_payload(const uint8_t *payload, usb_response_t *rsp)
+{
+    if (payload[0] >= BOARD102_MOTOR_COUNT)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return false;
+    }
+    if (payload[1] > 1u)
+    {
+        rsp->status = USB_STATUS_PAYLOAD_INVALID;
+        return false;
+    }
+    return true;
+}
+
+static bool validate_motion_move_payload(const uint8_t *payload, usb_response_t *rsp)
+{
+    uint8_t motor_id = payload[0];
+    uint8_t direction = payload[1];
+    uint32_t steps = decode_u32_le_local(&payload[2]);
+    uint32_t interval_us = decode_u32_le_local(&payload[6]);
+
+    if (motor_id >= BOARD102_MOTOR_COUNT)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return false;
+    }
+    if (direction > 1u)
+    {
+        rsp->status = USB_STATUS_PAYLOAD_INVALID;
+        return false;
+    }
+    if (steps == 0u || interval_us < BOARD102_MIN_STEP_INTERVAL_US)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return false;
+    }
+
+    uint8_t motion_entry[BOARD102_STATUS_MOTOR_ENTRY_LEN] = {0};
+    if (!fetch_motion_entry(rsp, motor_id, motion_entry))
+    {
+        return false;
+    }
+    if (motion_entry[1] == 0u)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return false;
+    }
+
+    return true;
+}
+
+static bool validate_motion_single_motor_payload(const uint8_t *payload, usb_response_t *rsp)
+{
+    if (payload[0] >= BOARD102_MOTOR_COUNT)
+    {
+        rsp->status = USB_STATUS_RANGE_INVALID;
+        return false;
+    }
+    return true;
 }
 
 static bool process_debug_passthrough_command(const usb_command_t *cmd, usb_response_t *rsp)
@@ -744,6 +1193,62 @@ static void process_usb_command(const usb_command_t *cmd)
         warmup_start();
         rsp.target_scan_lines = g_scan_target_lines;
         rsp.completed_scan_lines = g_scan_completed_lines;
+        break;
+
+    case USB_CMD_ILLUMINATION_GET_STATE:
+        (void)process_illumination_get_state(&rsp);
+        break;
+
+    case USB_CMD_ILLUMINATION_SET_LEVELS:
+        (void)process_illumination_set_levels_payload(cmd, &rsp, cmd->debug_payload);
+        break;
+
+    case USB_CMD_ILLUMINATION_SET_STEADY:
+        (void)process_illumination_set_steady(cmd->debug_payload, &rsp);
+        break;
+
+    case USB_CMD_ILLUMINATION_CONFIG_SYNC:
+        (void)process_illumination_config_sync(cmd->debug_payload, &rsp);
+        break;
+
+    case USB_CMD_ILLUMINATION_SET_SYNC_PULSE:
+        (void)process_illumination_set_sync_pulse(cmd->debug_payload, &rsp);
+        break;
+
+    case USB_CMD_MOTION_GET_STATE:
+        (void)process_motion_get_state(&rsp);
+        break;
+
+    case USB_CMD_MOTION_SET_ENABLE:
+        if (!validate_motion_enable_payload(cmd->debug_payload, &rsp))
+        {
+            break;
+        }
+        (void)process_motion_passthrough(PERICONTROL_CMD_SET_MOTOR_ENABLE, cmd->debug_payload, cmd->debug_payload_len, 2u, &rsp);
+        break;
+
+    case USB_CMD_MOTION_MOVE_STEPS:
+        if (!validate_motion_move_payload(cmd->debug_payload, &rsp))
+        {
+            break;
+        }
+        (void)process_motion_passthrough(PERICONTROL_CMD_MOVE_MOTOR_STEPS, cmd->debug_payload, cmd->debug_payload_len, 10u, &rsp);
+        break;
+
+    case USB_CMD_MOTION_STOP:
+        if (!validate_motion_single_motor_payload(cmd->debug_payload, &rsp))
+        {
+            break;
+        }
+        (void)process_motion_passthrough(PERICONTROL_CMD_STOP_MOTOR, cmd->debug_payload, cmd->debug_payload_len, 1u, &rsp);
+        break;
+
+    case USB_CMD_MOTION_APPLY_CONFIG:
+        if (!validate_motion_single_motor_payload(cmd->debug_payload, &rsp))
+        {
+            break;
+        }
+        (void)process_motion_passthrough(PERICONTROL_CMD_APPLY_MOTOR_CONFIG, cmd->debug_payload, cmd->debug_payload_len, 1u, &rsp);
         break;
 
     case USB_CMD_STOP_SCAN:

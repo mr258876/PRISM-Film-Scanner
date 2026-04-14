@@ -17,7 +17,7 @@ In the current architecture, this RP2040 firmware is the Scanner Main Control Bo
 - **PC -> Scanner Main Control Board**: USB vendor interface (`A5/5A` framed protocol)
 - **Scanner Main Control Board -> Peripheral Control Board**: UART0 on GPIO28/GPIO29 (`A6/6A` framed subordinate protocol)
 
-That means the Scanner Main Control Board owns the stable host-facing USB API. Peripheral-board details stay behind the board-to-board UART link, with only a dedicated debug passthrough command available when raw subordinate access is needed.
+That means the Scanner Main Control Board owns the stable host-facing USB API. Peripheral-board details stay behind the board-to-board UART link, while the public control surface is grouped by scanner capability domains such as illumination and motion. A dedicated debug passthrough command still exists when raw subordinate access is needed.
 
 ## Introduction
 

@@ -5,12 +5,11 @@
 
 #include "exposure_sync.h"
 
+#include <string.h>
 #include <stdint.h>
 
-#include "control_protocol.h"
 #include "led_pwm.h"
 
-#include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 
@@ -18,7 +17,7 @@
 #include "exposure_sync.pio.h"
 
 #define EXPOSURE_SYNC_VALID_LED_MASK  ((1u << LED_CHANNEL_COUNT) - 1u)
-#define EXPOSURE_SYNC_MIN_PULSE_US    2u
+#define EXPOSURE_SYNC_MIN_PULSE_CLK   1u
 
 typedef struct {
     bool enabled;
@@ -34,18 +33,15 @@ static const uint8_t g_led_pins[LED_CHANNEL_COUNT] = {
 static PIO g_pio = pio0;
 static uint g_program_offset = 0;
 static bool g_initialized = false;
-static uint8_t g_mode = CONTROL_LED_SYNC_MODE_DISABLED;
-static uint8_t g_led_mask = 0u;
-static uint32_t g_pulse_us = 0u;
+static uint8_t g_steady_mask = 0u;
+static uint8_t g_sync_mask = 0u;
+static uint32_t g_pulse_clk[LED_CHANNEL_COUNT] = {0};
 static led_sync_sm_state_t g_sm_state[LED_CHANNEL_COUNT] = {0};
 
 static bool any_sync_led_active(void)
 {
-    uint8_t enabled_mask = led_pwm_get_enabled_mask();
     for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
-        bool led_sync = (g_mode == CONTROL_LED_SYNC_MODE_EXPOSURE_PULSE) &&
-                        (((g_led_mask >> i) & 0x01u) != 0u) &&
-                        (((enabled_mask >> i) & 0x01u) != 0u);
+        bool led_sync = ((g_sync_mask >> i) & 0x01u) != 0u;
         if (led_sync && gpio_get(g_led_pins[i])) {
             return true;
         }
@@ -53,17 +49,9 @@ static bool any_sync_led_active(void)
     return false;
 }
 
-static uint32_t pulse_ticks_from_us(uint32_t pulse_us)
+static void clear_pulse_widths(void)
 {
-    uint64_t sys_hz = clock_get_hz(clk_sys);
-    uint64_t ticks = (sys_hz * pulse_us) / 1000000u;
-    if (ticks == 0u) {
-        ticks = 1u;
-    }
-    if (ticks > 0xFFFFFFFFu) {
-        return 0u;
-    }
-    return (uint32_t)(ticks - 1u);
+    memset(g_pulse_clk, 0, sizeof(g_pulse_clk));
 }
 
 static void stop_led_sm(uint32_t channel, bool drive_high)
@@ -107,18 +95,20 @@ static void start_led_sm(uint32_t channel, uint32_t pulse_ticks)
 
 void exposure_sync_refresh_outputs(void)
 {
-    uint8_t enabled_mask = led_pwm_get_enabled_mask();
-    bool sync_mode = (g_mode == CONTROL_LED_SYNC_MODE_EXPOSURE_PULSE);
-    uint32_t pulse_ticks = pulse_ticks_from_us(g_pulse_us);
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        bool led_sync = ((g_sync_mask >> i) & 0x01u) != 0u;
+        if (!led_sync) {
+            stop_led_sm(i, false);
+        }
+    }
+
+    led_pwm_set_output_mask(g_steady_mask);
 
     for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
-        bool led_enabled = ((enabled_mask >> i) & 0x01u) != 0u;
-        bool led_sync = sync_mode && (((g_led_mask >> i) & 0x01u) != 0u) && led_enabled;
-
-        if (led_sync) {
+        bool led_sync = ((g_sync_mask >> i) & 0x01u) != 0u;
+        uint32_t pulse_ticks = (g_pulse_clk[i] > 0u) ? (g_pulse_clk[i] - 1u) : 0u;
+        if (led_sync && pulse_ticks != 0u) {
             start_led_sm(i, pulse_ticks);
-        } else {
-            stop_led_sm(i, led_enabled);
         }
     }
 }
@@ -130,34 +120,62 @@ void exposure_sync_init(void)
     gpio_pull_down(EXPOSURE_SYNC_PIN);
 
     g_program_offset = pio_add_program(g_pio, &exposure_sync_pulse_program);
-    g_mode = CONTROL_LED_SYNC_MODE_DISABLED;
-    g_led_mask = 0u;
-    g_pulse_us = 0u;
+    g_steady_mask = 0u;
+    g_sync_mask = 0u;
+    clear_pulse_widths();
     g_initialized = true;
     exposure_sync_refresh_outputs();
 }
 
-bool exposure_sync_configure(uint8_t mode, uint8_t led_mask, uint32_t pulse_us)
+bool exposure_sync_set_steady_mask(uint8_t steady_mask)
 {
-    led_mask = (uint8_t)(led_mask & EXPOSURE_SYNC_VALID_LED_MASK);
-    if (mode != CONTROL_LED_SYNC_MODE_DISABLED && mode != CONTROL_LED_SYNC_MODE_EXPOSURE_PULSE) {
+    steady_mask = (uint8_t)(steady_mask & EXPOSURE_SYNC_VALID_LED_MASK);
+    if ((steady_mask & g_sync_mask) != 0u) {
         return false;
     }
 
-    if (mode == CONTROL_LED_SYNC_MODE_EXPOSURE_PULSE &&
-        (led_mask == 0u || pulse_us < EXPOSURE_SYNC_MIN_PULSE_US || pulse_ticks_from_us(pulse_us) == 0u))
-    {
+    g_steady_mask = steady_mask;
+    if (g_initialized) {
+        exposure_sync_refresh_outputs();
+    }
+    return true;
+}
+
+bool exposure_sync_set_sync_mask(uint8_t sync_mask)
+{
+    sync_mask = (uint8_t)(sync_mask & EXPOSURE_SYNC_VALID_LED_MASK);
+    if ((sync_mask & g_steady_mask) != 0u) {
         return false;
     }
 
-    if (mode == CONTROL_LED_SYNC_MODE_DISABLED) {
-        led_mask = 0u;
-        pulse_us = 0u;
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        if (((sync_mask >> i) & 0x01u) != 0u && g_pulse_clk[i] < EXPOSURE_SYNC_MIN_PULSE_CLK) {
+            return false;
+        }
     }
 
-    g_mode = mode;
-    g_led_mask = led_mask;
-    g_pulse_us = pulse_us;
+    g_sync_mask = sync_mask;
+    if (g_initialized) {
+        exposure_sync_refresh_outputs();
+    }
+    return true;
+}
+
+bool exposure_sync_set_pulse_clk(const uint32_t *pulse_clk)
+{
+    if (pulse_clk == NULL) {
+        return false;
+    }
+
+    uint32_t requested_pulses[LED_CHANNEL_COUNT] = {0};
+    memcpy(requested_pulses, pulse_clk, sizeof(requested_pulses));
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        if (((g_sync_mask >> i) & 0x01u) != 0u && requested_pulses[i] < EXPOSURE_SYNC_MIN_PULSE_CLK) {
+            return false;
+        }
+    }
+
+    memcpy(g_pulse_clk, requested_pulses, sizeof(g_pulse_clk));
     if (g_initialized) {
         exposure_sync_refresh_outputs();
     }
@@ -170,8 +188,8 @@ void exposure_sync_get_status(exposure_sync_status_t *status_out)
         return;
     }
 
-    status_out->mode = g_mode;
+    status_out->steady_mask = g_steady_mask;
+    status_out->sync_mask = g_sync_mask;
     status_out->active = any_sync_led_active() ? 1u : 0u;
-    status_out->led_mask = g_led_mask;
-    status_out->pulse_us = g_pulse_us;
+    memcpy(status_out->pulse_clk, g_pulse_clk, sizeof(status_out->pulse_clk));
 }

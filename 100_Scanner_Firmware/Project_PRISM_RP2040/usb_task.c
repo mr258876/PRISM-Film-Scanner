@@ -34,6 +34,26 @@ static bool is_debug_passthrough_opcode(uint8_t opcode)
     }
 }
 
+static bool is_domain_payload_opcode(uint8_t opcode)
+{
+    switch (opcode)
+    {
+    case USB_CMD_ILLUMINATION_GET_STATE:
+    case USB_CMD_ILLUMINATION_SET_LEVELS:
+    case USB_CMD_ILLUMINATION_SET_STEADY:
+    case USB_CMD_ILLUMINATION_CONFIG_SYNC:
+    case USB_CMD_ILLUMINATION_SET_SYNC_PULSE:
+    case USB_CMD_MOTION_GET_STATE:
+    case USB_CMD_MOTION_SET_ENABLE:
+    case USB_CMD_MOTION_MOVE_STEPS:
+    case USB_CMD_MOTION_STOP:
+    case USB_CMD_MOTION_APPLY_CONFIG:
+        return true;
+    default:
+        return false;
+    }
+}
+
 typedef enum {
     USB_RX_STATE_WAIT_MARKER = 0,
     USB_RX_STATE_WAIT_OPCODE,
@@ -90,6 +110,16 @@ static bool is_valid_frame_opcode(uint8_t opcode)
     case USB_CMD_SET_SCAN_LINES:
     case USB_CMD_STOP_SCAN:
     case USB_CMD_START_WARMUP:
+    case USB_CMD_ILLUMINATION_GET_STATE:
+    case USB_CMD_ILLUMINATION_SET_LEVELS:
+    case USB_CMD_ILLUMINATION_SET_STEADY:
+    case USB_CMD_ILLUMINATION_CONFIG_SYNC:
+    case USB_CMD_ILLUMINATION_SET_SYNC_PULSE:
+    case USB_CMD_MOTION_GET_STATE:
+    case USB_CMD_MOTION_SET_ENABLE:
+    case USB_CMD_MOTION_MOVE_STEPS:
+    case USB_CMD_MOTION_STOP:
+    case USB_CMD_MOTION_APPLY_CONFIG:
     case USB_CMD_DEBUG_PASSTHROUGH:
         return true;
     default:
@@ -104,10 +134,27 @@ static bool is_valid_frame_len(uint8_t opcode, uint16_t frame_len)
     case USB_CMD_START_SCAN:
     case USB_CMD_STOP_SCAN:
     case USB_CMD_START_WARMUP:
+    case USB_CMD_ILLUMINATION_GET_STATE:
+    case USB_CMD_MOTION_GET_STATE:
         return frame_len == 0;
     case USB_CMD_GET_PARAM_BY_HASH:
     case USB_CMD_SET_SCAN_LINES:
         return frame_len == USB_GET_PARAM_PAYLOAD_LEN;
+    case USB_CMD_ILLUMINATION_SET_LEVELS:
+        return frame_len == 8u;
+    case USB_CMD_ILLUMINATION_SET_STEADY:
+        return frame_len == 4u;
+    case USB_CMD_ILLUMINATION_CONFIG_SYNC:
+        return frame_len == 4u;
+    case USB_CMD_ILLUMINATION_SET_SYNC_PULSE:
+        return frame_len == 16u;
+    case USB_CMD_MOTION_SET_ENABLE:
+        return frame_len == 2u;
+    case USB_CMD_MOTION_MOVE_STEPS:
+        return frame_len == 10u;
+    case USB_CMD_MOTION_STOP:
+    case USB_CMD_MOTION_APPLY_CONFIG:
+        return frame_len == 1u;
     case USB_CMD_DEBUG_PASSTHROUGH:
         return frame_len >= 2u && frame_len <= (USB_DEBUG_PASSTHROUGH_MAX_SUBPAYLOAD + 2u);
     case USB_CMD_SET_PARAM_BY_HASH:
@@ -180,7 +227,7 @@ static void try_queue_payload_command(uint8_t *frame_opcode,
         cmd.scan_lines = decode_u32_le(frame_payload);
         break;
     default:
-        if (is_debug_passthrough_opcode(*frame_opcode))
+        if (is_debug_passthrough_opcode(*frame_opcode) || is_domain_payload_opcode(*frame_opcode))
         {
             cmd.debug_payload_len = *frame_len;
             memcpy(cmd.debug_payload, frame_payload, *frame_len);
@@ -342,7 +389,7 @@ void usb_task_core1_main(void)
                 encode_u32_le(&payload[USB_GET_PARAM_PAYLOAD_LEN], rsp.completed_scan_lines);
                 payload_len = USB_SCAN_STATUS_PAYLOAD_LEN;
             }
-            else if (is_debug_passthrough_opcode(rsp.opcode))
+            else if (is_debug_passthrough_opcode(rsp.opcode) || is_domain_payload_opcode(rsp.opcode))
             {
                 if (rsp.debug_payload_len > USB_DEBUG_PASSTHROUGH_MAX_FRAME_PAYLOAD)
                 {

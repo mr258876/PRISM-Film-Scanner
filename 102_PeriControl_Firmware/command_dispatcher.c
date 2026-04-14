@@ -21,6 +21,8 @@
 #include "tmc2209_bus.h"
 
 #define STATUS_PAYLOAD_LEN  (4u + (LED_CHANNEL_COUNT * 2u) + (MOTOR_COUNT * 12u) + 8u)
+#define ILLUMINATION_STATUS_PAYLOAD_LEN ((LED_CHANNEL_COUNT * 2u) + 4u + (LED_CHANNEL_COUNT * 4u))
+#define MOTION_STATUS_PAYLOAD_LEN (MOTOR_COUNT * 12u)
 
 static prism_params_t g_params;
 static bool g_params_dirty = false;
@@ -100,6 +102,7 @@ void command_dispatcher_background_step(void)
 
 static bool apply_led_params(void)
 {
+    led_pwm_set_wrap(g_params.led_pwm_wrap);
     led_pwm_set_levels(g_params.led_level, LED_CHANNEL_COUNT);
     exposure_sync_refresh_outputs();
     return true;
@@ -154,11 +157,55 @@ static void push_status_payload(control_response_t *rsp)
         out += 4;
     }
 
-    *out++ = sync_status.mode;
+    *out++ = sync_status.steady_mask;
+    *out++ = sync_status.sync_mask;
     *out++ = sync_status.active;
-    *out++ = sync_status.led_mask;
     *out++ = 0u;
-    encode_u32_le(out, sync_status.pulse_us);
+    encode_u32_le(out, 0u);
+}
+
+static void push_illumination_status_payload(control_response_t *rsp)
+{
+    exposure_sync_status_t sync_status = {0};
+    exposure_sync_get_status(&sync_status);
+
+    rsp->payload_len = ILLUMINATION_STATUS_PAYLOAD_LEN;
+    uint8_t *out = rsp->payload;
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        encode_u16_le(out, g_params.led_level[i]);
+        out += 2;
+    }
+
+    *out++ = sync_status.steady_mask;
+    *out++ = sync_status.sync_mask;
+    *out++ = sync_status.active;
+    *out++ = 0u;
+
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        encode_u32_le(out, sync_status.pulse_clk[i]);
+        out += 4;
+    }
+}
+
+static void push_motion_status_payload(control_response_t *rsp)
+{
+    rsp->payload_len = MOTION_STATUS_PAYLOAD_LEN;
+    uint8_t *out = rsp->payload;
+
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        stepper_status_t status = {0};
+        stepper_task_get_status(i, &status);
+        *out++ = i;
+        *out++ = status.enabled ? 1u : 0u;
+        *out++ = status.running ? 1u : 0u;
+        *out++ = status.direction ? 1u : 0u;
+        *out++ = (uint8_t)status.diag_state;
+        *out++ = 0u;
+        encode_u16_le(out, (uint16_t)((status.configured_interval_us > 0xFFFFu) ? 0xFFFFu : status.configured_interval_us));
+        out += 2;
+        encode_u32_le(out, status.remaining_steps);
+        out += 4;
+    }
 }
 
 static void process_get_param_by_hash(const control_command_t *cmd, control_response_t *rsp)
@@ -266,26 +313,6 @@ static void process_set_param_by_hash(const control_command_t *cmd, control_resp
     rsp->payload[5] = param_len;
     memcpy(&rsp->payload[6], &cmd->payload[6], param_len);
     rsp->payload_len = (uint16_t)(6u + param_len);
-}
-
-static void process_set_led_levels(const control_command_t *cmd, control_response_t *rsp)
-{
-    if (cmd->payload_len != (LED_CHANNEL_COUNT * 2u)) {
-        rsp->status = CONTROL_STATUS_PAYLOAD_INVALID;
-        return;
-    }
-
-    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
-        g_params.led_level[i] = decode_u16_le(&cmd->payload[i * 2u]);
-        if (g_params.led_level[i] > g_params.led_pwm_wrap) {
-            g_params.led_level[i] = g_params.led_pwm_wrap;
-        }
-    }
-
-    apply_led_params();
-    schedule_params_save();
-    memcpy(rsp->payload, cmd->payload, cmd->payload_len);
-    rsp->payload_len = cmd->payload_len;
 }
 
 static void process_set_motor_enable(const control_command_t *cmd, control_response_t *rsp)
@@ -407,23 +434,85 @@ static void process_apply_motor_config(const control_command_t *cmd, control_res
     rsp->payload_len = 1u;
 }
 
-static void process_config_led_sync(const control_command_t *cmd, control_response_t *rsp)
+static void process_set_led_levels(const control_command_t *cmd, control_response_t *rsp)
 {
     if (cmd->payload_len != 8u) {
         rsp->status = CONTROL_STATUS_PAYLOAD_INVALID;
         return;
     }
 
-    uint8_t mode = cmd->payload[0];
-    uint8_t led_mask = cmd->payload[1];
-    uint32_t pulse_us = decode_u32_le(&cmd->payload[4]);
-    if (!exposure_sync_configure(mode, led_mask, pulse_us)) {
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        g_params.led_level[i] = decode_u16_le(&cmd->payload[i * 2u]);
+        if (g_params.led_level[i] > g_params.led_pwm_wrap) {
+            g_params.led_level[i] = g_params.led_pwm_wrap;
+        }
+    }
+
+    if (!apply_led_params()) {
+        rsp->status = CONTROL_STATUS_HW_ERROR;
+        return;
+    }
+
+    schedule_params_save();
+    memcpy(rsp->payload, cmd->payload, 8u);
+    rsp->payload_len = 8u;
+}
+
+static void process_set_steady_illumination(const control_command_t *cmd, control_response_t *rsp)
+{
+    if (cmd->payload_len != 4u) {
+        rsp->status = CONTROL_STATUS_PAYLOAD_INVALID;
+        return;
+    }
+
+    uint8_t steady_mask = cmd->payload[0];
+    if (!exposure_sync_set_steady_mask(steady_mask)) {
         rsp->status = CONTROL_STATUS_RANGE_INVALID;
         return;
     }
 
-    memcpy(rsp->payload, cmd->payload, 8u);
-    rsp->payload_len = 8u;
+    rsp->payload[0] = steady_mask;
+    rsp->payload[1] = 0u;
+    rsp->payload[2] = 0u;
+    rsp->payload[3] = 0u;
+    rsp->payload_len = 4u;
+}
+
+static void process_config_led_sync(const control_command_t *cmd, control_response_t *rsp)
+{
+    if (cmd->payload_len != 4u) {
+        rsp->status = CONTROL_STATUS_PAYLOAD_INVALID;
+        return;
+    }
+
+    uint8_t sync_mask = cmd->payload[0];
+    if (!exposure_sync_set_sync_mask(sync_mask)) {
+        rsp->status = CONTROL_STATUS_RANGE_INVALID;
+        return;
+    }
+
+    memcpy(rsp->payload, cmd->payload, 4u);
+    rsp->payload_len = 4u;
+}
+
+static void process_set_sync_pulse_clk(const control_command_t *cmd, control_response_t *rsp)
+{
+    if (cmd->payload_len != 16u) {
+        rsp->status = CONTROL_STATUS_PAYLOAD_INVALID;
+        return;
+    }
+
+    uint32_t pulse_clk[LED_CHANNEL_COUNT] = {0};
+    for (uint32_t i = 0; i < LED_CHANNEL_COUNT; i++) {
+        pulse_clk[i] = decode_u32_le(&cmd->payload[i * 4u]);
+    }
+    if (!exposure_sync_set_pulse_clk(pulse_clk)) {
+        rsp->status = CONTROL_STATUS_RANGE_INVALID;
+        return;
+    }
+
+    memcpy(rsp->payload, cmd->payload, 16u);
+    rsp->payload_len = 16u;
 }
 
 bool command_dispatcher_init(void)
@@ -466,6 +555,12 @@ void command_dispatcher_process(const control_command_t *cmd, control_response_t
         case CONTROL_CMD_GET_STATUS:
             push_status_payload(rsp);
             break;
+        case CONTROL_CMD_GET_ILLUMINATION_STATUS:
+            push_illumination_status_payload(rsp);
+            break;
+        case CONTROL_CMD_GET_MOTION_STATUS:
+            push_motion_status_payload(rsp);
+            break;
         case CONTROL_CMD_SET_LED_LEVELS:
             process_set_led_levels(cmd, rsp);
             break;
@@ -489,6 +584,12 @@ void command_dispatcher_process(const control_command_t *cmd, control_response_t
             break;
         case CONTROL_CMD_CONFIG_LED_SYNC:
             process_config_led_sync(cmd, rsp);
+            break;
+        case CONTROL_CMD_SET_STEADY_ILLUMINATION:
+            process_set_steady_illumination(cmd, rsp);
+            break;
+        case CONTROL_CMD_SET_SYNC_PULSE_CLK:
+            process_set_sync_pulse_clk(cmd, rsp);
             break;
         default:
             rsp->status = CONTROL_STATUS_BAD_FRAME;
