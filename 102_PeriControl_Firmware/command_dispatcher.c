@@ -23,10 +23,15 @@
 #define STATUS_PAYLOAD_LEN  (4u + (LED_CHANNEL_COUNT * 2u) + (MOTOR_COUNT * 12u) + 8u)
 #define ILLUMINATION_STATUS_PAYLOAD_LEN ((LED_CHANNEL_COUNT * 2u) + 4u + (LED_CHANNEL_COUNT * 4u))
 #define MOTION_STATUS_PAYLOAD_LEN (MOTOR_COUNT * 12u)
+#define TMC2209_PRESENCE_ABSENT 0x40u
+#define TMC2209_PROBE_REG_ADDR  0x00u
+#define TMC2209_INIT_IRUN        3u
+#define TMC2209_INIT_IHOLD       3u
 
 static prism_params_t g_params;
 static bool g_params_dirty = false;
 static uint64_t g_params_save_deadline_us = 0;
+static uint8_t g_tmc_presence_status[MOTOR_COUNT] = {0};
 
 static void encode_u16_le(uint8_t *out, uint16_t value)
 {
@@ -108,8 +113,23 @@ static bool apply_led_params(void)
     return true;
 }
 
+static void apply_tmc_init_current(void)
+{
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        g_params.motor_irun[i] = TMC2209_INIT_IRUN;
+        g_params.motor_ihold[i] = TMC2209_INIT_IHOLD;
+    }
+}
+
 static bool apply_motor_params(uint8_t motor_index)
 {
+    uint32_t probe_value = 0;
+    if (!tmc2209_read_register(motor_index, TMC2209_PROBE_REG_ADDR, &probe_value)) {
+        g_tmc_presence_status[motor_index] = TMC2209_PRESENCE_ABSENT;
+        return true;
+    }
+
+    g_tmc_presence_status[motor_index] = 0u;
     return tmc2209_apply_basic_config(motor_index,
                                       g_params.motor_irun[motor_index],
                                       g_params.motor_ihold[motor_index],
@@ -150,7 +170,7 @@ static void push_status_payload(control_response_t *rsp)
         *out++ = status.running ? 1u : 0u;
         *out++ = status.direction ? 1u : 0u;
         *out++ = (uint8_t)status.diag_state;
-        *out++ = 0u;
+        *out++ = g_tmc_presence_status[i];
         encode_u16_le(out, (uint16_t)((status.configured_interval_us > 0xFFFFu) ? 0xFFFFu : status.configured_interval_us));
         out += 2;
         encode_u32_le(out, status.remaining_steps);
@@ -200,7 +220,7 @@ static void push_motion_status_payload(control_response_t *rsp)
         *out++ = status.running ? 1u : 0u;
         *out++ = status.direction ? 1u : 0u;
         *out++ = (uint8_t)status.diag_state;
-        *out++ = 0u;
+        *out++ = g_tmc_presence_status[i];
         encode_u16_le(out, (uint16_t)((status.configured_interval_us > 0xFFFFu) ? 0xFFFFu : status.configured_interval_us));
         out += 2;
         encode_u32_le(out, status.remaining_steps);
@@ -301,6 +321,7 @@ static void process_set_param_by_hash(const control_command_t *cmd, control_resp
             tmc2209_bus_init();
         }
         (void)apply_led_params();
+        apply_tmc_init_current();
         (void)apply_all_motor_params();
         rsp->status = CONTROL_STATUS_HW_ERROR;
         return;
@@ -524,6 +545,12 @@ bool command_dispatcher_init(void)
     if (!apply_system_clock_khz(g_params.sys_clock_khz)) {
         prism_params_set_defaults(&g_params);
         (void)apply_system_clock_khz(g_params.sys_clock_khz);
+    }
+
+    apply_tmc_init_current();
+
+    for (uint8_t i = 0; i < MOTOR_COUNT; i++) {
+        g_params.motor_microsteps[i] = 256u;
     }
 
     led_pwm_init(g_params.led_pwm_wrap);
