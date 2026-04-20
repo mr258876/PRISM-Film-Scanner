@@ -15,8 +15,8 @@ This project aims to develop an open-source high-resolution film scanner. The su
 - Finished - E-mount apapter (Mar 14, 2026)
 - In progress - Control software
 - In progress - Synchronized RGB light source
+- In progress - Film holder & feeding system
 - Planned - Auto focus system
-- Planned - Film holder & feeding system
 - Planned - Sensor circuit optimization
 
 ## Getting Started
@@ -68,7 +68,11 @@ To reproduce the current milestone, you need the scanner hardware package in `10
 - [RP2040 Control Interface](100_Scanner_Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md)
 
 ## Credits
-- [jackw01/scanlight](https://github.com/jackw01/scanlight)
+- [jackw01/scanlight](https://github.com/jackw01/scanlight) for inspiring light source design.
+
+## Tips on Using Coding Agents
+
+This project contains both firmware and hardware designs, and sometimes coding agents may need to lookup the boards. It is recommanded to prompt the agents ro read netlist files instead of schematic PDFs, in order to save token usages. 
 
 ## License
 
