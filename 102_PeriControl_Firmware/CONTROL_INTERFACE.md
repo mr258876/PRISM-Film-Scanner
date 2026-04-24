@@ -168,7 +168,7 @@ Response payload echoes the same 16-byte payload.
 
 ### `0x50` Get Motion State
 
-Response payload:
+Query response payload:
 
 ```text
 +---------------------------------------------------------------+
@@ -177,6 +177,8 @@ Response payload:
 | remaining_steps(u32)                                           |
 +---------------------------------------------------------------+
 ```
+
+The Peripheral Control Board may also send an unsolicited `0x50` motion event after a finite motor move completes. A motion event carries exactly one 12-byte motor entry using the same field layout as the query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
 
 ### `0x51` Set Motor Enable
 
@@ -205,6 +207,14 @@ Response payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
 ### `0x56` Write TMC Register
 
 Request payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
+
+### `0x57` Prepare Motor Move On Exposure Sync
+
+Request payload: `motor_id(u8), direction(u8), steps(u32), interval_us(u32)`
+
+- Arms the selected motor move but does not step immediately.
+- Motion starts on the next valid `EXPOSURE_SYNC` cycle observed by board-102 (high edge followed by fall edge).
+- The response payload echoes the normalized 10-byte request payload.
 
 ## Status Codes
 

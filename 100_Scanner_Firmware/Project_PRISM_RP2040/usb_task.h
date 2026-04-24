@@ -28,6 +28,7 @@ enum {
     USB_CMD_MOTION_MOVE_STEPS = 0x52,
     USB_CMD_MOTION_STOP = 0x53,
     USB_CMD_MOTION_APPLY_CONFIG = 0x54,
+    USB_CMD_MOTION_PREPARE_ON_SYNC = 0x57,
     USB_CMD_DEBUG_PASSTHROUGH = 0xF0
 };
 
@@ -103,5 +104,6 @@ void usb_task_init(void);
 void usb_task_core1_main(void);
 bool usb_task_try_recv(usb_command_t *cmd);
 void usb_task_send_blocking(const usb_response_t *rsp);
+bool usb_task_try_send(const usb_response_t *rsp);
 
 #endif

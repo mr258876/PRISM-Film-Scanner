@@ -42,6 +42,7 @@
 #define BOARD102_STATUS_MOTOR_COUNT BOARD102_MOTOR_COUNT
 #define BOARD102_STATUS_MOTION_LEN (BOARD102_STATUS_MOTOR_ENTRY_LEN * BOARD102_STATUS_MOTOR_COUNT)
 #define BOARD102_ILLUMINATION_STATUS_LEN 28u
+#define BOARD102_MOTION_EVENT_POLL_INTERVAL_US 20000u
 
 static prism_params_t g_params;
 static bool g_params_dirty = false;
@@ -65,6 +66,9 @@ static volatile uint8_t g_scan_dma_pending_bank = 1;
 static volatile uint32_t g_scan_prepared_lines = 0;
 static volatile uint32_t g_scan_bank_lines[SCAN_DMA_BANKS] = {0, 0};
 static volatile bool g_warmup_active = false;
+static bool g_board102_motion_seen = false;
+static bool g_board102_motion_running[BOARD102_MOTOR_COUNT] = {false};
+static uint64_t g_board102_motion_poll_deadline_us = 0u;
 static uint32_t g_warmup_dma_buf[WARMUP_DMA_CHUNK_LINES];
 static uint g_line_sig_offset = 0;
 static uint g_cds_line_offset = 0;
@@ -240,6 +244,54 @@ static bool fetch_motion_entry(usb_response_t *rsp,
            &motion_state[motor_id * BOARD102_STATUS_MOTOR_ENTRY_LEN],
            BOARD102_STATUS_MOTOR_ENTRY_LEN);
     return true;
+}
+
+static void pericontrol_event_step(void)
+{
+    uint64_t now = time_us_64();
+    if ((int64_t)(now - g_board102_motion_poll_deadline_us) < 0) {
+        return;
+    }
+    g_board102_motion_poll_deadline_us = now + BOARD102_MOTION_EVENT_POLL_INTERVAL_US;
+
+    uint8_t status = 0u;
+    uint16_t payload_len = 0u;
+    uint8_t payload[PERICONTROL_MAX_PAYLOAD] = {0};
+    if (pericontrol_link_transceive(PERICONTROL_CMD_GET_MOTION_STATUS,
+                                    NULL,
+                                    0u,
+                                    &status,
+                                    &payload_len,
+                                    payload,
+                                    sizeof(payload)) != PERICONTROL_LINK_OK ||
+        status != 0u ||
+        payload_len != BOARD102_STATUS_MOTION_LEN)
+    {
+        return;
+    }
+
+    for (uint8_t i = 0; i < BOARD102_MOTOR_COUNT; i++) {
+        uint8_t *entry = &payload[i * BOARD102_STATUS_MOTOR_ENTRY_LEN];
+        uint8_t motor_id = entry[0];
+        if (motor_id >= BOARD102_MOTOR_COUNT) {
+            continue;
+        }
+
+        bool running = entry[2] != 0u;
+        uint32_t remaining = decode_u32_le_local(&entry[8]);
+        if (g_board102_motion_seen && g_board102_motion_running[motor_id] && !running && remaining == 0u) {
+            usb_response_t event = {
+                .status = USB_STATUS_OK,
+                .opcode = USB_CMD_MOTION_GET_STATE,
+                .debug_payload_len = BOARD102_STATUS_MOTOR_ENTRY_LEN,
+            };
+            memcpy(event.debug_payload, entry, BOARD102_STATUS_MOTOR_ENTRY_LEN);
+            (void)usb_task_try_send(&event);
+        }
+
+        g_board102_motion_running[motor_id] = running;
+    }
+    g_board102_motion_seen = true;
 }
 
 static bool process_illumination_get_state(usb_response_t *rsp)
@@ -1233,6 +1285,26 @@ static void process_usb_command(const usb_command_t *cmd)
             break;
         }
         (void)process_motion_passthrough(PERICONTROL_CMD_MOVE_MOTOR_STEPS, cmd->debug_payload, cmd->debug_payload_len, 10u, &rsp);
+        if (rsp.status == USB_STATUS_OK && cmd->debug_payload[0] < BOARD102_MOTOR_COUNT)
+        {
+            g_board102_motion_running[cmd->debug_payload[0]] = true;
+            g_board102_motion_seen = true;
+            g_board102_motion_poll_deadline_us = time_us_64() + BOARD102_MOTION_EVENT_POLL_INTERVAL_US;
+        }
+        break;
+
+    case USB_CMD_MOTION_PREPARE_ON_SYNC:
+        if (!validate_motion_move_payload(cmd->debug_payload, &rsp))
+        {
+            break;
+        }
+        (void)process_motion_passthrough(PERICONTROL_CMD_PREPARE_MOTOR_ON_SYNC, cmd->debug_payload, cmd->debug_payload_len, 10u, &rsp);
+        if (rsp.status == USB_STATUS_OK && cmd->debug_payload[0] < BOARD102_MOTOR_COUNT)
+        {
+            g_board102_motion_running[cmd->debug_payload[0]] = true;
+            g_board102_motion_seen = true;
+            g_board102_motion_poll_deadline_us = time_us_64() + BOARD102_MOTION_EVENT_POLL_INTERVAL_US;
+        }
         break;
 
     case USB_CMD_MOTION_STOP:
@@ -1291,6 +1363,8 @@ int main()
 
     while (true)
     {
+        pericontrol_event_step();
+
         usb_command_t cmd;
         if (usb_task_try_recv(&cmd))
         {

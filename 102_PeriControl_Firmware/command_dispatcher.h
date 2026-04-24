@@ -13,5 +13,6 @@
 bool command_dispatcher_init(void);
 void command_dispatcher_process(const control_command_t *cmd, control_response_t *rsp);
 void command_dispatcher_background_step(void);
+bool command_dispatcher_try_pop_async_response(control_response_t *rsp);
 
 #endif

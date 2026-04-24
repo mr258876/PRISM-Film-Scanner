@@ -48,6 +48,7 @@ static bool is_domain_payload_opcode(uint8_t opcode)
     case USB_CMD_MOTION_MOVE_STEPS:
     case USB_CMD_MOTION_STOP:
     case USB_CMD_MOTION_APPLY_CONFIG:
+    case USB_CMD_MOTION_PREPARE_ON_SYNC:
         return true;
     default:
         return false;
@@ -120,6 +121,7 @@ static bool is_valid_frame_opcode(uint8_t opcode)
     case USB_CMD_MOTION_MOVE_STEPS:
     case USB_CMD_MOTION_STOP:
     case USB_CMD_MOTION_APPLY_CONFIG:
+    case USB_CMD_MOTION_PREPARE_ON_SYNC:
     case USB_CMD_DEBUG_PASSTHROUGH:
         return true;
     default:
@@ -151,6 +153,7 @@ static bool is_valid_frame_len(uint8_t opcode, uint16_t frame_len)
     case USB_CMD_MOTION_SET_ENABLE:
         return frame_len == 2u;
     case USB_CMD_MOTION_MOVE_STEPS:
+    case USB_CMD_MOTION_PREPARE_ON_SYNC:
         return frame_len == 10u;
     case USB_CMD_MOTION_STOP:
     case USB_CMD_MOTION_APPLY_CONFIG:
@@ -260,6 +263,11 @@ void usb_task_send_blocking(const usb_response_t *rsp)
     {
         tight_loop_contents();
     }
+}
+
+bool usb_task_try_send(const usb_response_t *rsp)
+{
+    return queue_try_add(&usb_tx_queue, rsp);
 }
 
 void usb_task_core1_main(void)

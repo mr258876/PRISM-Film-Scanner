@@ -248,7 +248,7 @@ These commands are also part of the formal Scanner Main Control Board API. They 
 ### `0x50` - Get Motion State
 
 - Request payload length: `0`
-- Response payload:
+- Query response payload:
 
 ```text
 +---------------------------------------------------------------+
@@ -257,6 +257,10 @@ These commands are also part of the formal Scanner Main Control Board API. They 
 | remaining_steps(u32)                                           |
 +---------------------------------------------------------------+
 ```
+
+The device may also send an unsolicited `0x50` motion event when a finite motor move completes. A motion event carries exactly one 12-byte motor entry using the same field layout as the query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
+
+Performance note: the host-facing TinyUSB vendor interface and the board-100 to board-102 UART link are control-plane transports with small frames. DMA is not expected to improve this ACK/event path materially; the high-throughput scan timing path already uses RP2040 DMA to feed PIO, while image data leaves through the separate CY7C68013A FIFO/USB path.
 
 ### `0x51` - Set Motion Enable
 
@@ -318,6 +322,25 @@ Request payload:
 Response payload echoes the normalized 1-byte payload.
 
 - `motor_id` must reference an implemented motion channel.
+
+### `0x57` - Prepare Motion On Exposure Sync
+
+Request payload:
+
+```text
++---------------+----------------+-------------+------------------+
+| motor_id (u8) | direction (u8) | steps (u32) | interval_us (u32)|
++---------------+----------------+-------------+------------------+
+```
+
+Response payload echoes the normalized 10-byte payload.
+
+- `motor_id` must reference an implemented motion channel.
+- `direction` must be either `0` or `1`.
+- `steps` must be non-zero.
+- `interval_us` must be at least `10`.
+- The addressed motor must already be enabled.
+- The move is armed and starts on the next valid `EXPOSURE_SYNC` cycle (high then falling edge).
 
 ## Debug / Service Commands
 

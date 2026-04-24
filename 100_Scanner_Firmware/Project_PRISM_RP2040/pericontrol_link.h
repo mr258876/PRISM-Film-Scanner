@@ -24,7 +24,8 @@ enum {
     PERICONTROL_CMD_STOP_MOTOR          = 0x53,
     PERICONTROL_CMD_APPLY_MOTOR_CONFIG  = 0x54,
     PERICONTROL_CMD_READ_TMC_REG        = 0x55,
-    PERICONTROL_CMD_WRITE_TMC_REG       = 0x56
+    PERICONTROL_CMD_WRITE_TMC_REG       = 0x56,
+    PERICONTROL_CMD_PREPARE_MOTOR_ON_SYNC = 0x57
 };
 
 enum {
@@ -51,5 +52,10 @@ pericontrol_link_result_t pericontrol_link_transceive(uint8_t opcode,
                                                       uint16_t *rx_payload_len_out,
                                                       uint8_t *rx_payload_out,
                                                       uint16_t rx_payload_max_len);
+bool pericontrol_link_try_recv_async(uint8_t *opcode_out,
+                                     uint8_t *status_out,
+                                     uint16_t *rx_payload_len_out,
+                                     uint8_t *rx_payload_out,
+                                     uint16_t rx_payload_max_len);
 
 #endif

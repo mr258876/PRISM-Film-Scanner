@@ -228,6 +228,23 @@ static void push_motion_status_payload(control_response_t *rsp)
     }
 }
 
+static void push_single_motion_status_payload(control_response_t *rsp,
+                                             uint8_t motor_index,
+                                             const stepper_status_t *status)
+{
+    rsp->payload_len = MOTION_STATUS_PAYLOAD_LEN / MOTOR_COUNT;
+    uint8_t *out = rsp->payload;
+    *out++ = motor_index;
+    *out++ = status->enabled ? 1u : 0u;
+    *out++ = status->running ? 1u : 0u;
+    *out++ = status->direction ? 1u : 0u;
+    *out++ = (uint8_t)status->diag_state;
+    *out++ = g_tmc_presence_status[motor_index];
+    encode_u16_le(out, (uint16_t)((status->configured_interval_us > 0xFFFFu) ? 0xFFFFu : status->configured_interval_us));
+    out += 2;
+    encode_u32_le(out, status->remaining_steps);
+}
+
 static void process_get_param_by_hash(const control_command_t *cmd, control_response_t *rsp)
 {
     if (cmd->payload_len != 4u) {
@@ -367,6 +384,28 @@ static void process_move_motor_steps(const control_command_t *cmd, control_respo
     uint32_t steps = decode_u32_le(&cmd->payload[2]);
     uint32_t interval_us = decode_u32_le(&cmd->payload[6]);
     if (!stepper_task_start_move(motor_index, direction, steps, interval_us)) {
+        rsp->status = CONTROL_STATUS_RANGE_INVALID;
+        return;
+    }
+
+    rsp->payload[0] = motor_index;
+    rsp->payload[1] = direction ? 1u : 0u;
+    memcpy(&rsp->payload[2], &cmd->payload[2], 8u);
+    rsp->payload_len = 10u;
+}
+
+static void process_prepare_motor_on_sync(const control_command_t *cmd, control_response_t *rsp)
+{
+    if (cmd->payload_len != 10u) {
+        rsp->status = CONTROL_STATUS_PAYLOAD_INVALID;
+        return;
+    }
+
+    uint8_t motor_index = cmd->payload[0];
+    bool direction = cmd->payload[1] != 0u;
+    uint32_t steps = decode_u32_le(&cmd->payload[2]);
+    uint32_t interval_us = decode_u32_le(&cmd->payload[6]);
+    if (!stepper_task_prepare_move_on_sync(motor_index, direction, steps, interval_us)) {
         rsp->status = CONTROL_STATUS_RANGE_INVALID;
         return;
     }
@@ -606,6 +645,9 @@ void command_dispatcher_process(const control_command_t *cmd, control_response_t
         case CONTROL_CMD_WRITE_TMC_REG:
             process_write_tmc_reg(cmd, rsp);
             break;
+        case CONTROL_CMD_PREPARE_MOTOR_ON_SYNC:
+            process_prepare_motor_on_sync(cmd, rsp);
+            break;
         case CONTROL_CMD_APPLY_MOTOR_CONFIG:
             process_apply_motor_config(cmd, rsp);
             break;
@@ -622,4 +664,22 @@ void command_dispatcher_process(const control_command_t *cmd, control_response_t
             rsp->status = CONTROL_STATUS_BAD_FRAME;
             break;
     }
+}
+
+bool command_dispatcher_try_pop_async_response(control_response_t *rsp)
+{
+    if (rsp == NULL) {
+        return false;
+    }
+
+    stepper_motion_event_t event = {0};
+    if (!stepper_task_try_pop_motion_complete_event(&event)) {
+        return false;
+    }
+
+    rsp->status = CONTROL_STATUS_OK;
+    rsp->opcode = CONTROL_CMD_GET_MOTION_STATUS;
+    rsp->payload_len = 0u;
+    push_single_motion_status_payload(rsp, event.motor_index, &event.status);
+    return true;
 }

@@ -88,6 +88,7 @@ static bool is_valid_frame_opcode(uint8_t opcode)
         case CONTROL_CMD_APPLY_MOTOR_CONFIG:
         case CONTROL_CMD_READ_TMC_REG:
         case CONTROL_CMD_WRITE_TMC_REG:
+        case CONTROL_CMD_PREPARE_MOTOR_ON_SYNC:
             return true;
         default:
             return false;
