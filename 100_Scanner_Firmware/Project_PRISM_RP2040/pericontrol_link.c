@@ -93,6 +93,7 @@ static bool is_valid_board102_opcode(uint8_t opcode)
         case PERICONTROL_CMD_READ_TMC_REG:
         case PERICONTROL_CMD_WRITE_TMC_REG:
         case PERICONTROL_CMD_PREPARE_MOTOR_ON_SYNC:
+        case PERICONTROL_EVT_MOTION_COMPLETE:
             return true;
         default:
             return false;
@@ -357,7 +358,8 @@ pericontrol_link_result_t pericontrol_link_transceive(uint8_t opcode,
             *rx_payload_len_out = frame_payload_len;
             return PERICONTROL_LINK_OK;
         }
-        return PERICONTROL_LINK_BAD_RESPONSE;
+
+        queue_async_frame(response_header[1], response_header[2], frame_payload_len, frame_payload);
     }
 
     return PERICONTROL_LINK_TIMEOUT;

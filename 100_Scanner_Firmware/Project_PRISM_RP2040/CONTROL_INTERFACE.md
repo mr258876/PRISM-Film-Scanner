@@ -258,7 +258,7 @@ These commands are also part of the formal Scanner Main Control Board API. They 
 +---------------------------------------------------------------+
 ```
 
-The device may also send an unsolicited `0x50` motion event when a finite motor move completes. A motion event carries exactly one 12-byte motor entry using the same field layout as the query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
+Finite motor completion is reported by the dedicated `0x58` motion-complete event.
 
 Performance note: the host-facing TinyUSB vendor interface and the board-100 to board-102 UART link are control-plane transports with small frames. DMA is not expected to improve this ACK/event path materially; the high-throughput scan timing path already uses RP2040 DMA to feed PIO, while image data leaves through the separate CY7C68013A FIFO/USB path.
 
@@ -341,6 +341,14 @@ Response payload echoes the normalized 10-byte payload.
 - `interval_us` must be at least `10`.
 - The addressed motor must already be enabled.
 - The move is armed and starts on the next valid `EXPOSURE_SYNC` cycle (high then falling edge).
+
+### `0x58` - Motion Complete Event
+
+- Device-to-host event only; do not send as a request.
+- Event payload length: `12`
+- Payload layout: one motor entry using the same field layout as the `0x50` query response.
+
+The completed motor reports `running = 0` and `remaining_steps = 0`.
 
 ## Debug / Service Commands
 

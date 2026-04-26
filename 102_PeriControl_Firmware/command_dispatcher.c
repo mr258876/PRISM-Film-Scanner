@@ -678,7 +678,7 @@ bool command_dispatcher_try_pop_async_response(control_response_t *rsp)
     }
 
     rsp->status = CONTROL_STATUS_OK;
-    rsp->opcode = CONTROL_CMD_GET_MOTION_STATUS;
+    rsp->opcode = CONTROL_EVT_MOTION_COMPLETE;
     rsp->payload_len = 0u;
     push_single_motion_status_payload(rsp, event.motor_index, &event.status);
     return true;

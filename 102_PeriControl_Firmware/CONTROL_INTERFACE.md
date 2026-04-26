@@ -178,7 +178,7 @@ Query response payload:
 +---------------------------------------------------------------+
 ```
 
-The Peripheral Control Board may also send an unsolicited `0x50` motion event after a finite motor move completes. A motion event carries exactly one 12-byte motor entry using the same field layout as the query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
+Finite motor completion is reported by the dedicated `0x58` motion-complete event.
 
 ### `0x51` Set Motor Enable
 
@@ -215,6 +215,10 @@ Request payload: `motor_id(u8), direction(u8), steps(u32), interval_us(u32)`
 - Arms the selected motor move but does not step immediately.
 - Motion starts on the next valid `EXPOSURE_SYNC` cycle observed by board-102 (high edge followed by fall edge).
 - The response payload echoes the normalized 10-byte request payload.
+
+### `0x58` Motion Complete Event
+
+Device-to-host event only. Payload is one 12-byte motor entry using the same field layout as the `0x50` query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
 
 ## Status Codes
 

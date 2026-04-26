@@ -49,6 +49,7 @@ static bool is_domain_payload_opcode(uint8_t opcode)
     case USB_CMD_MOTION_STOP:
     case USB_CMD_MOTION_APPLY_CONFIG:
     case USB_CMD_MOTION_PREPARE_ON_SYNC:
+    case USB_EVT_MOTION_COMPLETE:
         return true;
     default:
         return false;

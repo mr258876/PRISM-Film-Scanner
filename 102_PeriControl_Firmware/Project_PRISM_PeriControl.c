@@ -30,6 +30,10 @@ int main()
             uart_task_send_blocking(&rsp);
         }
 
+        if (command_dispatcher_try_pop_async_response(&rsp)) {
+            uart_task_send_blocking(&rsp);
+        }
+
         command_dispatcher_background_step();
     }
 }
