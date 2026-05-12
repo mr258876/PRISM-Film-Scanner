@@ -74,7 +74,7 @@ Response payload:
 | sys_clock_khz (u32) | led1..led4 levels (4 x u16)              |
 +----------------------+------------------------------------------+
 | for each motor: motor_id(u8), enabled(u8), running(u8),       |
-| direction(u8), diag(u8), reserved(u8), interval_us(u16),      |
+| direction(u8), diag(u8), reserved(u8), interval_ns(u32),      |
 | remaining_steps(u32)                                           |
 +---------------------------------------------------------------+
 | steady_mask(u8) | sync_mask(u8) | sync_active(u8)       |
@@ -173,7 +173,7 @@ Query response payload:
 ```text
 +---------------------------------------------------------------+
 | for each motor: motor_id(u8), enabled(u8), running(u8),       |
-| direction(u8), diag(u8), reserved(u8), interval_us(u16),      |
+| direction(u8), diag(u8), reserved(u8), interval_ns(u32),      |
 | remaining_steps(u32)                                           |
 +---------------------------------------------------------------+
 ```
@@ -186,7 +186,11 @@ Request payload: `motor_id(u8), enabled(u8)`
 
 ### `0x52` Move Motor Steps
 
-Request payload: `motor_id(u8), direction(u8), steps(u32), interval_us(u32)`
+Request payload: `motor_id(u8), direction(u8), steps(u32), interval_ns(u32)`
+
+- `interval_ns` is expressed in whole nanoseconds.
+- The board converts `interval_ns` into local PIO timing with a 20MHz stepper state machine, so the effective motion quantum is 50ns.
+- Values below `750ns` are rejected.
 
 ### `0x53` Stop Motor
 
@@ -210,15 +214,16 @@ Request payload: `motor_id(u8), reg_addr(u8), reg_value(u32)`
 
 ### `0x57` Prepare Motor Move On Exposure Sync
 
-Request payload: `motor_id(u8), direction(u8), steps(u32), interval_us(u32)`
+Request payload: `motor_id(u8), direction(u8), steps(u32), interval_ns(u32)`
 
 - Arms the selected motor move but does not step immediately.
 - Motion starts on the next valid `EXPOSURE_SYNC` cycle observed by board-102 (high edge followed by fall edge).
 - The response payload echoes the normalized 10-byte request payload.
+- Sync waiting and pulse generation are both handled locally by board-102 PIO state machines.
 
 ### `0x58` Motion Complete Event
 
-Device-to-host event only. Payload is one 12-byte motor entry using the same field layout as the `0x50` query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
+Device-to-host event only. Payload is one 14-byte motor entry using the same field layout as the `0x50` query response. The completed motor reports `running = 0` and `remaining_steps = 0`.
 
 ## Status Codes
 
@@ -246,4 +251,10 @@ Device-to-host event only. Payload is one 12-byte motor entry using the same fie
 - `prism.motor{1,2,3}.ihold`
 - `prism.motor{1,2,3}.microsteps`
 - `prism.motor{1,2,3}.stealthchop_enable`
-- `prism.motor{1,2,3}.step_interval_us`
+- `prism.motor{1,2,3}.step_interval_ns`
+
+## Timing Notes
+
+- Motion pulse timing is derived locally from the board-102 system clock by RP2040 PIO state machines.
+- Requested motion intervals are quantized upward to the nearest 50ns step before execution.
+- While any motor move is running or armed for sync start, attempts to change `prism.sys_clock_khz` are rejected with `BUSY`.

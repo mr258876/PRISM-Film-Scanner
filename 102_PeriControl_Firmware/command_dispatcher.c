@@ -20,9 +20,9 @@
 #include "stepper_task.h"
 #include "tmc2209_bus.h"
 
-#define STATUS_PAYLOAD_LEN  (4u + (LED_CHANNEL_COUNT * 2u) + (MOTOR_COUNT * 12u) + 8u)
+#define STATUS_PAYLOAD_LEN  (4u + (LED_CHANNEL_COUNT * 2u) + (MOTOR_COUNT * 14u) + 8u)
 #define ILLUMINATION_STATUS_PAYLOAD_LEN ((LED_CHANNEL_COUNT * 2u) + 4u + (LED_CHANNEL_COUNT * 4u))
-#define MOTION_STATUS_PAYLOAD_LEN (MOTOR_COUNT * 12u)
+#define MOTION_STATUS_PAYLOAD_LEN (MOTOR_COUNT * 14u)
 #define TMC2209_PRESENCE_ABSENT 0x40u
 #define TMC2209_PROBE_REG_ADDR  0x00u
 #define TMC2209_INIT_IRUN        3u
@@ -171,8 +171,8 @@ static void push_status_payload(control_response_t *rsp)
         *out++ = status.direction ? 1u : 0u;
         *out++ = (uint8_t)status.diag_state;
         *out++ = g_tmc_presence_status[i];
-        encode_u16_le(out, (uint16_t)((status.configured_interval_us > 0xFFFFu) ? 0xFFFFu : status.configured_interval_us));
-        out += 2;
+        encode_u32_le(out, status.configured_interval_ns);
+        out += 4;
         encode_u32_le(out, status.remaining_steps);
         out += 4;
     }
@@ -221,8 +221,8 @@ static void push_motion_status_payload(control_response_t *rsp)
         *out++ = status.direction ? 1u : 0u;
         *out++ = (uint8_t)status.diag_state;
         *out++ = g_tmc_presence_status[i];
-        encode_u16_le(out, (uint16_t)((status.configured_interval_us > 0xFFFFu) ? 0xFFFFu : status.configured_interval_us));
-        out += 2;
+        encode_u32_le(out, status.configured_interval_ns);
+        out += 4;
         encode_u32_le(out, status.remaining_steps);
         out += 4;
     }
@@ -240,8 +240,8 @@ static void push_single_motion_status_payload(control_response_t *rsp,
     *out++ = status->direction ? 1u : 0u;
     *out++ = (uint8_t)status->diag_state;
     *out++ = g_tmc_presence_status[motor_index];
-    encode_u16_le(out, (uint16_t)((status->configured_interval_us > 0xFFFFu) ? 0xFFFFu : status->configured_interval_us));
-    out += 2;
+    encode_u32_le(out, status->configured_interval_ns);
+    out += 4;
     encode_u32_le(out, status->remaining_steps);
 }
 
@@ -308,6 +308,11 @@ static void process_set_param_by_hash(const control_command_t *cmd, control_resp
     bool apply_ok = true;
     bool clock_changed = (key_hash == prism_param_hash_key("prism.sys_clock_khz"));
     if (clock_changed) {
+        if (stepper_task_has_active_motion()) {
+            g_params = previous;
+            rsp->status = CONTROL_STATUS_BUSY;
+            return;
+        }
         apply_ok = apply_system_clock_khz(g_params.sys_clock_khz);
         if (apply_ok) {
             tmc2209_bus_init();
@@ -382,8 +387,8 @@ static void process_move_motor_steps(const control_command_t *cmd, control_respo
     uint8_t motor_index = cmd->payload[0];
     bool direction = cmd->payload[1] != 0u;
     uint32_t steps = decode_u32_le(&cmd->payload[2]);
-    uint32_t interval_us = decode_u32_le(&cmd->payload[6]);
-    if (!stepper_task_start_move(motor_index, direction, steps, interval_us)) {
+    uint32_t interval_ns = decode_u32_le(&cmd->payload[6]);
+    if (!stepper_task_start_move(motor_index, direction, steps, interval_ns)) {
         rsp->status = CONTROL_STATUS_RANGE_INVALID;
         return;
     }
@@ -404,8 +409,8 @@ static void process_prepare_motor_on_sync(const control_command_t *cmd, control_
     uint8_t motor_index = cmd->payload[0];
     bool direction = cmd->payload[1] != 0u;
     uint32_t steps = decode_u32_le(&cmd->payload[2]);
-    uint32_t interval_us = decode_u32_le(&cmd->payload[6]);
-    if (!stepper_task_prepare_move_on_sync(motor_index, direction, steps, interval_us)) {
+    uint32_t interval_ns = decode_u32_le(&cmd->payload[6]);
+    if (!stepper_task_prepare_move_on_sync(motor_index, direction, steps, interval_ns)) {
         rsp->status = CONTROL_STATUS_RANGE_INVALID;
         return;
     }

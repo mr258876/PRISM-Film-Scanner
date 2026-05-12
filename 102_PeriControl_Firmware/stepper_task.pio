@@ -1,0 +1,50 @@
+;
+; Copyright (c) 2026 mr258876
+;
+; SPDX-License-Identifier: MIT
+;
+
+.program stepper_pulse_immediate
+pull block
+mov x, osr
+pull block
+mov isr, osr
+.wrap_target
+pulse_high:
+    set pins, 1 [9]
+    set pins, 0
+    mov y, isr
+pulse_low_loop:
+    jmp y-- pulse_low_loop
+    jmp x-- pulse_high
+    irq set 0 rel
+stall:
+    pull block
+    jmp stall
+.wrap
+
+.program stepper_pulse_sync
+pull block
+mov x, osr
+pull block
+mov isr, osr
+.wrap_target
+wait_sync_idle:
+    wait 0 pin 0
+wait_sync_high:
+    wait 1 pin 0
+wait_sync_fall:
+    wait 0 pin 0
+    irq set 3
+pulse_high:
+    set pins, 1 [9]
+    set pins, 0
+    mov y, isr
+pulse_low_loop:
+    jmp y-- pulse_low_loop
+    jmp x-- pulse_high
+    irq set 0 rel
+stall:
+    pull block
+    jmp stall
+.wrap

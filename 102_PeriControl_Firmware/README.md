@@ -25,5 +25,5 @@ This folder contains the RP2040 firmware for `PRISM102 Peripheral Control`.
 - The framed UART protocol still uses the Project PRISM control-interface style with `A6/6A` markers and now appends a CRC-16 integrity field to each request/response frame.
 - LED outputs are currently driven as binary on/off channels. Any non-zero configured level enables the corresponding PT4115 channel, and `0` disables it.
 - `EXPOSURE_SYNC` falling edges are handled by RP2040 PIO so selected LED channels can be driven on for a fixed locally timed pulse width configured over the UART protocol.
-- Motor stepping is implemented with a lightweight repeating-timer pulse generator, while TMC2209 driver configuration happens over the shared UART bus.
+- Motor stepping is implemented with RP2040 PIO state machines for finer local pulse timing, while TMC2209 driver configuration happens over the shared UART bus.
 - The current implementation targets bring-up and host-side integration first: finite step moves, enable control, LED brightness control, and raw TMC register access are supported.

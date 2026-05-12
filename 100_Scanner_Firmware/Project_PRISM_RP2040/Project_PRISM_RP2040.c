@@ -35,10 +35,10 @@
 #define BOARD102_LED_CHANNEL_COUNT 4u
 #define BOARD102_VALID_LED_MASK ((1u << BOARD102_LED_CHANNEL_COUNT) - 1u)
 #define BOARD102_MOTOR_COUNT 3u
-#define BOARD102_MIN_STEP_INTERVAL_US 10u
+#define BOARD102_MIN_STEP_INTERVAL_NS 750u
 #define BOARD102_MIN_SYNC_PULSE_CLK 2u
 #define BOARD102_STATUS_MOTION_OFFSET 12u
-#define BOARD102_STATUS_MOTOR_ENTRY_LEN 12u
+#define BOARD102_STATUS_MOTOR_ENTRY_LEN 14u
 #define BOARD102_STATUS_MOTOR_COUNT BOARD102_MOTOR_COUNT
 #define BOARD102_STATUS_MOTION_LEN (BOARD102_STATUS_MOTOR_ENTRY_LEN * BOARD102_STATUS_MOTOR_COUNT)
 #define BOARD102_ILLUMINATION_STATUS_LEN 28u
@@ -614,7 +614,7 @@ static bool validate_motion_move_payload(const uint8_t *payload, usb_response_t 
     uint8_t motor_id = payload[0];
     uint8_t direction = payload[1];
     uint32_t steps = decode_u32_le_local(&payload[2]);
-    uint32_t interval_us = decode_u32_le_local(&payload[6]);
+    uint32_t interval_ns = decode_u32_le_local(&payload[6]);
 
     if (motor_id >= BOARD102_MOTOR_COUNT)
     {
@@ -626,7 +626,7 @@ static bool validate_motion_move_payload(const uint8_t *payload, usb_response_t 
         rsp->status = USB_STATUS_PAYLOAD_INVALID;
         return false;
     }
-    if (steps == 0u || interval_us < BOARD102_MIN_STEP_INTERVAL_US)
+    if (steps == 0u || interval_ns < BOARD102_MIN_STEP_INTERVAL_NS)
     {
         rsp->status = USB_STATUS_RANGE_INVALID;
         return false;

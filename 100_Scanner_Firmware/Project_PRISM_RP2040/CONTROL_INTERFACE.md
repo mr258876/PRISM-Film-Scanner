@@ -253,7 +253,7 @@ These commands are also part of the formal Scanner Main Control Board API. They 
 ```text
 +---------------------------------------------------------------+
 | for each motor: motor_id(u8), enabled(u8), running(u8),       |
-| direction(u8), diag(u8), reserved(u8), interval_us(u16),      |
+| direction(u8), diag(u8), reserved(u8), interval_ns(u32),      |
 | remaining_steps(u32)                                           |
 +---------------------------------------------------------------+
 ```
@@ -283,7 +283,7 @@ Request payload:
 
 ```text
 +---------------+----------------+-------------+------------------+
-| motor_id (u8) | direction (u8) | steps (u32) | interval_us (u32)|
+| motor_id (u8) | direction (u8) | steps (u32) | interval_ns (u32)|
 +---------------+----------------+-------------+------------------+
 ```
 
@@ -292,7 +292,7 @@ Response payload echoes the normalized 10-byte payload.
 - `motor_id` must reference an implemented motion channel.
 - `direction` must be either `0` or `1`.
 - `steps` must be non-zero.
-- `interval_us` must be at least `10`.
+- `interval_ns` must be at least `750`.
 - The addressed motor must already be enabled before a move request is accepted.
 
 ### `0x53` - Stop Motion
@@ -329,7 +329,7 @@ Request payload:
 
 ```text
 +---------------+----------------+-------------+------------------+
-| motor_id (u8) | direction (u8) | steps (u32) | interval_us (u32)|
+| motor_id (u8) | direction (u8) | steps (u32) | interval_ns (u32)|
 +---------------+----------------+-------------+------------------+
 ```
 
@@ -338,14 +338,14 @@ Response payload echoes the normalized 10-byte payload.
 - `motor_id` must reference an implemented motion channel.
 - `direction` must be either `0` or `1`.
 - `steps` must be non-zero.
-- `interval_us` must be at least `10`.
+- `interval_ns` must be at least `750`.
 - The addressed motor must already be enabled.
 - The move is armed and starts on the next valid `EXPOSURE_SYNC` cycle (high then falling edge).
 
 ### `0x58` - Motion Complete Event
 
 - Device-to-host event only; do not send as a request.
-- Event payload length: `12`
+- Event payload length: `14`
 - Payload layout: one motor entry using the same field layout as the `0x50` query response.
 
 The completed motor reports `running = 0` and `remaining_steps = 0`.

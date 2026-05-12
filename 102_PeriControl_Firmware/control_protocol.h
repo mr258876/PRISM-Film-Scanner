@@ -57,7 +57,7 @@ enum {
 };
 
 enum {
-    CONTROL_FRAME_MAX_PAYLOAD = 58u
+    CONTROL_FRAME_MAX_PAYLOAD = 64u
 };
 
 typedef struct {

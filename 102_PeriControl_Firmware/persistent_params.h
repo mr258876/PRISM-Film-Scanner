@@ -19,7 +19,7 @@ typedef struct {
     uint8_t motor_ihold[MOTOR_COUNT];
     uint16_t motor_microsteps[MOTOR_COUNT];
     uint8_t motor_stealthchop_enable[MOTOR_COUNT];
-    uint32_t motor_step_interval_us[MOTOR_COUNT];
+    uint32_t motor_step_interval_ns[MOTOR_COUNT];
 } prism_params_t;
 
 void prism_params_set_defaults(prism_params_t *params);

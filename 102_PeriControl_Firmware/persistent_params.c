@@ -15,7 +15,7 @@
 #include "pericontrol_defaults.h"
 
 #define PRISM_PARAM_STORE_MAGIC    0x50504354u
-#define PRISM_PARAM_STORE_VERSION  1u
+#define PRISM_PARAM_STORE_VERSION  2u
 
 #define PRISM_PARAM_TYPE_U8        1u
 #define PRISM_PARAM_TYPE_U16       2u
@@ -56,9 +56,9 @@ static prism_param_desc_t g_param_desc[] = {
     {"prism.motor1.stealthchop_enable", PRISM_PARAM_TYPE_U8, 1, offsetof(prism_params_t, motor_stealthchop_enable[0]), 0},
     {"prism.motor2.stealthchop_enable", PRISM_PARAM_TYPE_U8, 1, offsetof(prism_params_t, motor_stealthchop_enable[1]), 0},
     {"prism.motor3.stealthchop_enable", PRISM_PARAM_TYPE_U8, 1, offsetof(prism_params_t, motor_stealthchop_enable[2]), 0},
-    {"prism.motor1.step_interval_us", PRISM_PARAM_TYPE_U32, 4, offsetof(prism_params_t, motor_step_interval_us[0]), 0},
-    {"prism.motor2.step_interval_us", PRISM_PARAM_TYPE_U32, 4, offsetof(prism_params_t, motor_step_interval_us[1]), 0},
-    {"prism.motor3.step_interval_us", PRISM_PARAM_TYPE_U32, 4, offsetof(prism_params_t, motor_step_interval_us[2]), 0},
+    {"prism.motor1.step_interval_ns", PRISM_PARAM_TYPE_U32, 4, offsetof(prism_params_t, motor_step_interval_ns[0]), 0},
+    {"prism.motor2.step_interval_ns", PRISM_PARAM_TYPE_U32, 4, offsetof(prism_params_t, motor_step_interval_ns[1]), 0},
+    {"prism.motor3.step_interval_ns", PRISM_PARAM_TYPE_U32, 4, offsetof(prism_params_t, motor_step_interval_ns[2]), 0},
 };
 
 static uint32_t crc32_compute(const uint8_t *data, size_t len)
@@ -147,8 +147,8 @@ static void normalize_params(prism_params_t *params)
             params->motor_microsteps[i] = PRISM_DEFAULT_TMC_MICROSTEPS;
         }
         params->motor_stealthchop_enable[i] = params->motor_stealthchop_enable[i] ? 1u : 0u;
-        if (params->motor_step_interval_us[i] == 0u) {
-            params->motor_step_interval_us[i] = PRISM_DEFAULT_STEP_INTERVAL_US;
+        if (params->motor_step_interval_ns[i] == 0u) {
+            params->motor_step_interval_ns[i] = PRISM_DEFAULT_STEP_INTERVAL_NS;
         }
     }
 }
@@ -168,7 +168,7 @@ void prism_params_set_defaults(prism_params_t *params)
         params->motor_ihold[i] = PRISM_DEFAULT_TMC_IHOLD;
         params->motor_microsteps[i] = PRISM_DEFAULT_TMC_MICROSTEPS;
         params->motor_stealthchop_enable[i] = PRISM_DEFAULT_TMC_STEALTHCHOP_ENABLE;
-        params->motor_step_interval_us[i] = PRISM_DEFAULT_STEP_INTERVAL_US;
+        params->motor_step_interval_ns[i] = PRISM_DEFAULT_STEP_INTERVAL_NS;
     }
 }
 

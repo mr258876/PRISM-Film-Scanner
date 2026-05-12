@@ -55,6 +55,7 @@ add_executable(Project_PRISM_PeriControl
 )
 
 pico_generate_pio_header(Project_PRISM_PeriControl ${CMAKE_CURRENT_LIST_DIR}/exposure_sync.pio)
+pico_generate_pio_header(Project_PRISM_PeriControl ${CMAKE_CURRENT_LIST_DIR}/stepper_task.pio)
 
 pico_set_program_name(Project_PRISM_PeriControl "Project_PRISM_PeriControl")
 pico_set_program_version(Project_PRISM_PeriControl "0.1")
