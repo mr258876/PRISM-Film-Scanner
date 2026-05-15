@@ -7,12 +7,25 @@ This project aims to develop an open-source high-resolution film scanner. The su
 > [!WARNING]
 > Project under active development. Use at your own risk.
 
+
+## Project Structure
+
+- `100_Scanner_Hardware/` - scanner mainboard PCB design package, schematic export, Gerber archive, and hardware bring-up notes for the current prototype.
+- `100_Scanner_Firmware/` - prebuilt firmware images plus source trees for the scanner electronics.
+  - `Project_PRISM_RP2040/` - RP2040 firmware that generates CCD/ADC timing, exposes the USB control interface, and stores persistent scan parameters.
+  - `Project_PRISM_CY7C68013A/` - CY7C68013A/FX2LP firmware used as the synchronous USB FIFO buffer for ADC data.
+- `101_BackLight_Hardware/` - backlight hardware work area for the illumination subsystem.
+- `102_PeriControl_Hardware/` - hardware work area for peripheral-control electronics.
+- `102_PeriControl_Firmware/` - firmware work area for the peripheral-control subsystem.
+- `103_Gantry_Framework/` - gantry and framework mechanical design (SolidWorks parts and assemblies).
+- `Host Software/` - Windows host utility (WinUI 3) for USB debugging, scan debugging, and control of supported scanner hardware.
+- `Documents/` - datasheets and reference PDFs for the main electrical components.
+- `Lens Adapter/` - mechanical adapter assets for the current optical setup.
+- `Resources/` - timing diagrams and reference images used by the firmware design notes.
+
+
 ## Progress Milestones
 - Finished - Linear CCD sensor proof of concept (Mar 7, 2026)
-  ![Imaging Board PoC](/Resources/Imaging_Board_PoC.jpg)
-
-  *Forgive the poor soldering
-  
 - Finished - E-mount apapter (Mar 14, 2026)
 - Finished - Synchronized RGB light source (Apr 4, 2026)
 - Finished - Film holder & feeding system proof of concept (Apr 11, 2026)
@@ -21,8 +34,8 @@ This project aims to develop an open-source high-resolution film scanner. The su
   ![Initial Test Run](/Resources/Initial_Test_Run.jpg)
 
 - In progress - Control software
-- Planned - Film feeding system optimization
 - Planned - Sensor circuit optimization
+
 
 ## Getting Started
 
@@ -51,20 +64,6 @@ To reproduce the current milestone, you need the scanner hardware package in `10
    - Command and frame definitions are documented in `100_Scanner_Firmware/Project_PRISM_RP2040/CONTROL_INTERFACE.md`.
 
 
-## Project Structure
-
-- `100_Scanner_Hardware/` - scanner mainboard PCB design package, schematic export, Gerber archive, and hardware bring-up notes for the current prototype.
-- `100_Scanner_Firmware/` - prebuilt firmware images plus source trees for the scanner electronics.
-  - `Project_PRISM_RP2040/` - RP2040 firmware that generates CCD/ADC timing, exposes the USB control interface, and stores persistent scan parameters.
-  - `Project_PRISM_CY7C68013A/` - CY7C68013A/FX2LP firmware used as the synchronous USB FIFO buffer for ADC data.
-- `101_BackLight_Hardware/` - backlight hardware work area for the illumination subsystem.
-- `102_PeriControl_Hardware/` - hardware work area for peripheral-control electronics.
-- `102_PeriControl_Firmware/` - firmware work area for the peripheral-control subsystem.
-- `Host Software/` - Windows host utility for USB debugging, scan debugging, and early-stage control of supported scanner hardware.
-- `Documents/` - datasheets and reference PDFs for the main electrical components.
-- `Lens Adapter/` - mechanical adapter assets for the current optical setup.
-- `Resources/` - timing diagrams and reference images used by the firmware design notes.
-
 ## If You're Curious
 - [Hardware Requirements and Bring-up](100_Scanner_Hardware/README.md)
 - [Firmware Overview](100_Scanner_Firmware/README.md)
@@ -77,7 +76,7 @@ To reproduce the current milestone, you need the scanner hardware package in `10
 
 ## Tips on Using Coding Agents
 
-This project contains both firmware and hardware designs, and sometimes coding agents may need to lookup the boards. It is recommanded to prompt the agents ro read netlist files instead of schematic PDFs, in order to save token usages. 
+This project contains both firmware and hardware designs, and sometimes coding agents may need to lookup the boards. It is recommended to prompt the agents to read netlist files instead of schematic PDFs, in order to save token usage. 
 
 ## License
 
@@ -87,7 +86,7 @@ This repository contains hardware design files and firmware/software source code
 under different licenses. Unless a file states otherwise via `SPDX-License-Identifier`,
 the following defaults apply:
 
-1) `100_Scanner_Hardware/`, `101_BackLight_Hardware/`, `102_PeriControl_Hardware/`, and `Lens Adapter/`
+1) `100_Scanner_Hardware/`, `101_BackLight_Hardware/`, `102_PeriControl_Hardware/`, `103_Gantry_Framework/`, and `Lens Adapter/`
    - License: [CERN Open Hardware Licence v2 - Weakly Reciprocal](LICENSES/CERN-OHL-W-2.0.txt)
    - SPDX: `CERN-OHL-W-2.0`
 
