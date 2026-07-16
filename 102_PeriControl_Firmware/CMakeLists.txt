@@ -38,9 +38,9 @@ include(pico_sdk_import.cmake)
 
 project(Project_PRISM_PeriControl C CXX ASM)
 
-set(PICO_DEFAULT_BOOT_STAGE2_FILE
-    ${PICO_SDK_PATH}/src/rp2040/boot_stage2/boot2_generic_03h.S
-)
+# set(PICO_DEFAULT_BOOT_STAGE2_FILE
+#     ${PICO_SDK_PATH}/src/rp2040/boot_stage2/boot2_generic_03h.S
+# )
 pico_sdk_init()
 
 add_executable(Project_PRISM_PeriControl
