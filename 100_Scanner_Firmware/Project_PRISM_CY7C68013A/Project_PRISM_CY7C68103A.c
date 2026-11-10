@@ -50,16 +50,14 @@ void TD_Init(void) // Called once at startup
 	CPUCS = ((CPUCS & ~bmCLKSPD) | bmCLKSPD1);
 	SYNCDELAY;
 
-	PINFLAGSAB = 0x08; // FLAGA - EP2EF
+	PINFLAGSAB = 0x08; // FLAGA/B - EP[FIFOADR]PF EP2EF
 	SYNCDELAY;
-	PINFLAGSCD = 0xE0; // FLAGD - EP6FF
+	PINFLAGSCD = 0xCF; // FLAGC/D - EP6FF EP2FF
 	SYNCDELAY;
-	PORTACFG |= 0x80;
+	PORTACFG = (PORTACFG & 0x3F) | 0x80;	// Disable SLCS#; set PA7 as FLAGD output
 	SYNCDELAY;
 
 	EZUSB_Delay(100);	// Wait for external clock generation
-	// Internal clock, 48 MHz, Asynchronous Mode, Slave FIFO interface
-	// IFCONFIG = 0xCB; // 0b11001011
 	// External clock, 48 MHz, Synchronous Mode, Slave FIFO interface
 	IFCONFIG = 0x43; // 0b01000011
 	SYNCDELAY;
